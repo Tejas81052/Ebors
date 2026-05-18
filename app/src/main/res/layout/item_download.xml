@@ -40,7 +40,7 @@
                     android:contentDescription="@null"
                     android:padding="9dp"
                     android:src="@drawable/ic_file_24"
-                    app:tint="@color/browser_accent" />
+                    app:tint="?attr/browserAccent" />
             </com.google.android.material.card.MaterialCardView>
 
             <LinearLayout
@@ -81,7 +81,7 @@
             android:indeterminate="false"
             android:max="1000"
             android:progressBackgroundTint="@color/browser_progress_track"
-            android:progressTint="@color/browser_accent" />
+            android:progressTint="?attr/browserAccent" />
 
         <LinearLayout
             android:layout_width="match_parent"

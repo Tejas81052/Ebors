@@ -45,6 +45,10 @@
                 android:id="@+id/row_force_dark"
                 layout="@layout/item_settings_switch" />
 
+            <include
+                android:id="@+id/row_accent"
+                layout="@layout/item_settings_accent" />
+
             <TextView
                 style="@style/SettingsHeader"
                 android:text="@string/settings_section_search" />

@@ -55,6 +55,7 @@ class DownloadsActivity : AppCompatActivity(), DownloadRepository.Listener, Down
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyAccentTheme(BrowserPreferences.from(this))
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_downloads)
 

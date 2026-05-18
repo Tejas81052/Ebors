@@ -220,6 +220,7 @@ class MainActivity : AppCompatActivity() {
      * Set from JS (via [RefreshGuardBridge]) when the user's finger is
      * down on an element that scrolls / pages on its own — e.g. a
      * YouTube Shorts swipe-paging container or any element with
+     * 
      * `overscroll-behavior: contain | none`. The SwipeRefreshLayout's
      * OnChildScrollUpCallback reads this on the UI thread, so the
      * volatile-write / volatile-read pair is enough; no extra lock.
@@ -259,6 +260,15 @@ class MainActivity : AppCompatActivity() {
     private val tabs = mutableListOf<Tab>()
     private var activeTabIndex: Int = -1
     private var tabSwitcherView: TabSwitcherView? = null
+
+    /**
+     * v10 start-page controller. Shown whenever the active tab's
+     * display URL is [ABOUT_HOME_URL] (the user hasn't set a custom
+     * homepage in Settings); hidden whenever a real URL is loaded.
+     * Initialised once at bind time against the `start_page_overlay`
+     * include in `activity_main.xml`.
+     */
+    private var startPageView: StartPageView? = null
 
     /**
      * Tab whose runtime permission launcher is currently waiting on an
@@ -384,12 +394,27 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    /** Accent that was active when this activity was last (re)created.
+     *  onResume compares against [BrowserPreferences.accentKey] and
+     *  recreate()s the activity if they diverge — that's how a tap in
+     *  Settings → Accent flips the live UI's colour. */
+    private var boundAccentKey: String = AccentTheme.DEFAULT.key
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // BrowserPreferences first — we need it before super.onCreate
+        // so applyAccentTheme can pick the right Theme.EffectiveBrowser
+        // overlay before any layout inflation happens. enableEdgeToEdge
+        // also has to land before setContentView, so the order below is
+        // deliberate.
+        val prefs = BrowserPreferences.from(this)
+        applyAccentTheme(prefs)
+        boundAccentKey = prefs.accentKey
+
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        prefs = BrowserPreferences.from(this)
+        this.prefs = prefs
         // Initialise lastDesktopMode/lastForceDark from prefs so the first
         // applyPreferences() pass doesn't see a phantom "preference changed"
         // transition and reload every tab on cold start. (B9 from the audit.)
@@ -401,6 +426,7 @@ class MainActivity : AppCompatActivity() {
         DownloadRepository.initialize(applicationContext)
         BookmarkRepository.initialize(applicationContext)
         HistoryRepository.initialize(applicationContext)
+        TrackerStats.initialize(applicationContext)
         BrowserBlocker.adBlockEnabled = prefs.adBlockEnabled
         BrowserBlocker.siteBlockEnabled = prefs.siteBlockEnabled
         // Parse the block list now (network cache if present + new
@@ -538,6 +564,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // v10 accent picker: Settings can change the chosen accent while
+        // MainActivity sits in the back stack. Re-apply by recreate()
+        // so the new theme drives every drawable / layout resource.
+        if (prefs.accentKey != boundAccentKey) {
+            recreate()
+            return
+        }
         if (tabs.isNotEmpty()) tabs[0].webView.resumeTimers()
         // Only the active tab gets onResume(); background tabs stay
         // per-WebView paused. This deliberately diverges from the old
@@ -679,13 +712,17 @@ class MainActivity : AppCompatActivity() {
         if (!url.isNullOrBlank()) {
             tab.displayUrl = url
         }
+        // about:home is not a real URL — the WebView never loads it,
+        // and on activation switchToTab paints the start-page overlay
+        // on top of the (empty) WebView instead.
+        val isHome = url == ABOUT_HOME_URL
         if (switchTo) {
-            if (!url.isNullOrBlank()) {
+            if (!url.isNullOrBlank() && !isHome) {
                 newWebView.loadUrl(url)
             }
             switchToTab(tabs.size - 1)
         } else {
-            tab.pendingLoadUrl = url?.takeUnless { it.isBlank() }
+            tab.pendingLoadUrl = url?.takeUnless { it.isBlank() || isHome }
             newWebView.onPause()
             if (tabSwitcherView?.isShowing() == true) {
                 tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
@@ -734,10 +771,25 @@ class MainActivity : AppCompatActivity() {
             target.webView.loadUrl(deferredUrl)
         }
 
+        // v10: about:home tabs paint the start-page overlay instead of
+        // a real WebView page. Toggle the overlay before address-bar /
+        // chrome refresh so updateAddressBar sees a coherent state.
+        val targetIsHome = target.displayUrl == ABOUT_HOME_URL
+        if (targetIsHome) {
+            showStartPage()
+        } else {
+            hideStartPage()
+        }
+
         // Address bar / lock / nav now reflect the visible tab. The previous
         // overlay-popup design's V1 spoofing surface is gone because every
         // chrome update is sourced from the foreground tab.
-        updateAddressBar(target.webView.url ?: target.displayUrl.takeIf { it.isNotBlank() })
+        if (targetIsHome) {
+            addressBar.setText("")
+            updateSecurityIndicator(null)
+        } else {
+            updateAddressBar(target.webView.url ?: target.displayUrl.takeIf { it.isNotBlank() })
+        }
         renderBrowserCaption(SearchEngineResolver.displayName(prefs), target.isPrivate)
         updateNavigationButtons()
         // Find-in-page closes on tab switch — the query rarely makes sense
@@ -888,6 +940,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Listener handed to [StartPageView]. Centralises navigation
+     *  away from the start page (tile clicks, search-pill focus, edit
+     *  / history shortcuts, trackers card) so the activity keeps
+     *  control of the tab-state transitions. */
+    private val startPageListener = object : StartPageView.Listener {
+        override fun onStartPageSearchTapped() {
+            addressBar.requestFocus()
+            addressBar.post {
+                addressBar.selectAll()
+                getSystemService<InputMethodManager>()
+                    ?.showSoftInput(addressBar, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+
+        override fun onStartPageUrlTapped(url: String) {
+            loadAddress(url)
+        }
+
+        override fun onStartPageEditPinned() {
+            openLibraryLauncher.launch(Intent(this@MainActivity, BookmarksActivity::class.java))
+        }
+
+        override fun onStartPageOpenHistory() {
+            openLibraryLauncher.launch(Intent(this@MainActivity, BookmarksActivity::class.java))
+        }
+
+        override fun onStartPageTrackersTapped() {
+            startActivity(Intent(this@MainActivity, BlockedSitesActivity::class.java))
+        }
+    }
+
     /** Listener handed to [TabSwitcherView]. Implemented as an inner
      *  object so the activity stays the single source of truth for
      *  tab-management invariants. */
@@ -986,6 +1069,14 @@ class MainActivity : AppCompatActivity() {
             overlay = findViewById(R.id.tab_switcher_overlay),
             listener = tabSwitcherListener,
         )
+
+        // v10 start-page (about:home). Same one-time-bind pattern.
+        startPageView = StartPageView(
+            context = this,
+            overlay = findViewById(R.id.start_page_overlay),
+            listener = startPageListener,
+            prefs = prefs,
+        )
     }
 
     private fun applyInsets() {
@@ -1004,6 +1095,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         menuButton.setOnClickListener {
+            tabSwitcherView?.dismiss()
             showBrowserMenu()
         }
 
@@ -1049,7 +1141,14 @@ class MainActivity : AppCompatActivity() {
         // V8: bottom nav redesign. Bookmark / tabs / search / home / menu.
         // Every chrome button still operates on the active tab via
         // activeTabOrNull, matching the V2 contract.
+        //
+        // v10: every chrome button that takes the user *out of* the tab
+        // switcher first dismisses the overlay. Without this the
+        // overlay would still paint on top of the WebView and the
+        // chrome the user actually navigated to (suggestion list,
+        // bookmarks activity, home page) would look like it overlaps.
         bookmarkButton.setOnClickListener {
+            tabSwitcherView?.dismiss()
             openLibraryLauncher.launch(Intent(this, BookmarksActivity::class.java))
         }
 
@@ -1061,6 +1160,7 @@ class MainActivity : AppCompatActivity() {
         // Chrome/Brave: it focuses the address bar and pops the keyboard
         // so the user can type a query or URL straight away.
         searchButton.setOnClickListener {
+            tabSwitcherView?.dismiss()
             addressBar.requestFocus()
             addressBar.selectAll()
             getSystemService<InputMethodManager>()
@@ -1068,6 +1168,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         homeButton.setOnClickListener {
+            tabSwitcherView?.dismiss()
             loadAddress(homeUrl())
         }
 
@@ -1252,7 +1353,7 @@ class MainActivity : AppCompatActivity() {
      * a full-page reload, which is the bug we used to hit on Shorts.
      */
     private fun configureSwipeRefresh() {
-        webContainer.setColorSchemeResources(R.color.browser_accent)
+        webContainer.setColorSchemeColors(resolveThemeColor(R.attr.browserAccent))
         webContainer.setOnRefreshListener {
             val tab = activeTabOrNull
             if (tab == null) {
@@ -1641,6 +1742,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                // v10: if the tab was sitting on the start-page overlay
+                // and JS on the previously-loaded page just triggered a
+                // navigation, transition out of home so the user can
+                // see the page that's actually loading.
+                if (tab.displayUrl == ABOUT_HOME_URL &&
+                    !url.isNullOrBlank() &&
+                    url != ABOUT_HOME_URL &&
+                    tab === activeTabOrNull
+                ) {
+                    hideStartPage()
+                }
                 url?.let { tab.displayUrl = it }
                 tab.insecurePageWarningShown = false
                 // New document → previous page's touchstart/touchend
@@ -2574,15 +2686,57 @@ class MainActivity : AppCompatActivity() {
             openNewTab(url = url, switchTo = true)
             return
         }
+        // v10 about:home short-circuit. The start page is an in-app
+        // overlay, not a real web URL, so we don't push anything into
+        // the WebView — we just mark the tab and show the overlay.
+        if (url == ABOUT_HOME_URL) {
+            tab.displayUrl = ABOUT_HOME_URL
+            showStartPage()
+            addressBar.setText("")
+            updateSecurityIndicator(null)
+            updateNavigationButtons()
+            return
+        }
+        hideStartPage()
         updateAddressBar(url)
         tab.displayUrl = url
         tab.webView.loadUrl(url)
     }
 
+    /** Show the v10 paper-theme start page overlay over the WebView.
+     *  Idempotent: a second call while it's already up just refreshes
+     *  the underlying data. */
+    private fun showStartPage() {
+        val view = startPageView ?: return
+        // Halt anything the WebView is fetching so a long-running
+        // resource on the previous page doesn't paint a flash through
+        // the overlay or fire a misleading onPageFinished after the
+        // user has already moved on.
+        activeTabOrNull?.webView?.stopLoading()
+        view.show()
+        webContainer.isVisible = false
+    }
+
+    /** Restore the WebView surface. Called whenever a real URL is
+     *  loaded into the active tab (loadAddress, switchToTab to a
+     *  non-home tab, etc.). */
+    private fun hideStartPage() {
+        val view = startPageView ?: return
+        if (!view.isShowing()) return
+        view.hide()
+        webContainer.isVisible = true
+    }
+
+    /**
+     * Where the home button (and a freshly opened browser process)
+     * should go. v10 default is the paper-theme start page; users who
+     * explicitly typed a URL into Settings → Home page get that URL
+     * loaded as a real WebView page instead.
+     */
     private fun homeUrl(): String {
         val custom = prefs.homePage
         if (custom.isNotBlank()) return custom
-        return SearchEngineResolver.homeUrl(prefs)
+        return ABOUT_HOME_URL
     }
 
     private fun buildSearchUrl(query: String): String = SearchEngineResolver.buildSearchUrl(prefs, query)
@@ -2741,8 +2895,9 @@ class MainActivity : AppCompatActivity() {
             if (isBookmarked) R.drawable.bg_menu_quick_action_selected else R.drawable.bg_menu_quick_action,
         )
         saveLabel.setText(if (isBookmarked) R.string.saved_page else R.string.save_page)
-        saveLabel.setTextColor(ContextCompat.getColor(this, R.color.browser_accent))
-        saveIcon.imageTintList = ContextCompat.getColorStateList(this, R.color.browser_accent)
+        val accent = resolveThemeColor(R.attr.browserAccent)
+        saveLabel.setTextColor(accent)
+        saveIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
 
         setMenuTileEnabled(view.findViewById(R.id.menu_share), hasPage)
         setMenuTileEnabled(saveTile, hasPage)
@@ -2953,7 +3108,7 @@ class MainActivity : AppCompatActivity() {
         val span = SpannableStringBuilder()
         span.append("● ")
         span.setSpan(
-            ForegroundColorSpan(ContextCompat.getColor(this, R.color.browser_accent)),
+            ForegroundColorSpan(resolveThemeColor(R.attr.browserAccent)),
             0,
             1,
             Spanned.SPAN_INCLUSIVE_INCLUSIVE,
@@ -3366,6 +3521,18 @@ class MainActivity : AppCompatActivity() {
          * cold start.
          */
         private const val PRIVATE_PROFILE_NAME = "incognito"
+
+        /**
+         * Internal URL marker for the v10 start page. Stored as a tab's
+         * displayUrl whenever the user is on the paper-theme home page
+         * rather than a real web URL — switchToTab / loadAddress key
+         * off this constant to decide which surface to show.
+         *
+         * Not loaded into the WebView (which doesn't understand it);
+         * the WebView simply stays attached but visually covered by
+         * the start-page overlay.
+         */
+        const val ABOUT_HOME_URL = "about:home"
 
         /**
          * Actions that `intent://` URLs are allowed to invoke. Chosen as the

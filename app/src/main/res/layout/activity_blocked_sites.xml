@@ -64,7 +64,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:text="@string/blocked_sites_add_first"
-            app:backgroundTint="@color/browser_accent" />
+            app:backgroundTint="?attr/browserAccent" />
     </LinearLayout>
 
 </LinearLayout>

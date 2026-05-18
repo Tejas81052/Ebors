@@ -28,4 +28,25 @@
     <color name="avatar_blue">#7693C8</color>
     <color name="avatar_amber">#D9A055</color>
     <color name="avatar_ink">#C8BFA9</color>
+
+    <!--
+      Night variants of the selectable accent palette. Strong fills
+      shift one step warmer-bright so they still earn contrast on
+      the ink surface, and soft tints become dark "tinted card"
+      colours instead of pale washes.
+    -->
+    <color name="accent_terracotta">#E26545</color>
+    <color name="accent_terracotta_soft">#3F2A22</color>
+
+    <color name="accent_teal">#3A9784</color>
+    <color name="accent_teal_soft">#1F3530</color>
+
+    <color name="accent_royal_blue">#5C7BB8</color>
+    <color name="accent_royal_blue_soft">#1F2A40</color>
+
+    <color name="accent_deep_purple">#8E5CB8</color>
+    <color name="accent_deep_purple_soft">#311F40</color>
+
+    <color name="accent_charcoal">#E5DDC9</color>
+    <color name="accent_charcoal_soft">#3A322A</color>
 </resources>

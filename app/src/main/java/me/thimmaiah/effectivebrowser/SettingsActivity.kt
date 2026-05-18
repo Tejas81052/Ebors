@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -38,10 +39,16 @@ class SettingsActivity : AppCompatActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply the v10 accent theme before inflation so every drawable
+        // / view that reads ?attr/browserAccent resolves to the user's
+        // chosen palette.
+        val prefs = BrowserPreferences.from(this)
+        applyAccentTheme(prefs)
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        prefs = BrowserPreferences.from(this)
+        this.prefs = prefs
 
         val toolbar: MaterialToolbar = findViewById(R.id.settings_toolbar)
         toolbar.setNavigationOnClickListener { finish() }
@@ -66,6 +73,7 @@ class SettingsActivity : AppCompatActivity() {
             { prefs.forceDark },
             { prefs.forceDark = it },
         )
+        bindAccentRow()
         bindSwitchRow(
             R.id.row_ad_block,
             R.string.setting_ad_block_title,
@@ -425,6 +433,70 @@ class SettingsActivity : AppCompatActivity() {
         // user the full row as a hit target while keeping the switch
         // animation/ripple intact (performClick triggers them properly).
         row.setOnClickListener { switch.performClick() }
+    }
+
+    /**
+     * Wire the v10 accent picker — five swatches at the bottom of the
+     * Appearance section. Tapping a swatch:
+     *   1. saves the new accent key to prefs
+     *   2. recreate()s the activity so the new accent theme drives
+     *      every drawable / view (including this picker, which then
+     *      paints its own selection ring in the new accent)
+     */
+    private fun bindAccentRow() {
+        val row = findViewById<View>(R.id.row_accent)
+        val accents = AccentTheme.values()
+        val swatchIds = intArrayOf(
+            R.id.accent_swatch_0,
+            R.id.accent_swatch_1,
+            R.id.accent_swatch_2,
+            R.id.accent_swatch_3,
+            R.id.accent_swatch_4,
+        )
+        val checkIds = intArrayOf(
+            R.id.accent_swatch_check_0,
+            R.id.accent_swatch_check_1,
+            R.id.accent_swatch_check_2,
+            R.id.accent_swatch_check_3,
+            R.id.accent_swatch_check_4,
+        )
+        val currentKey = prefs.accentKey
+        for (i in accents.indices) {
+            val accent = accents[i]
+            val swatch = row.findViewById<View>(swatchIds[i])
+            val check = row.findViewById<View>(checkIds[i])
+            val isSelected = accent.key == currentKey
+
+            // Bind colour at runtime via tintList. We pick the swatch
+            // background drawable (plain vs. selected-with-stroke)
+            // based on the selected state so the active swatch reads
+            // as "pressed in" even before the check icon overlays it.
+            val bg = if (isSelected) R.drawable.bg_accent_swatch_selected
+            else R.drawable.bg_accent_swatch
+            swatch.setBackgroundResource(bg)
+            swatch.backgroundTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(this, accent.strongColorRes),
+            )
+            check.visibility = if (isSelected) View.VISIBLE else View.GONE
+
+            val label = getString(accent.labelRes)
+            swatch.contentDescription = getString(
+                if (isSelected) R.string.accent_swatch_selected_content_description
+                else R.string.accent_swatch_content_description,
+                label,
+            )
+
+            swatch.setOnClickListener {
+                if (accent.key == prefs.accentKey) return@setOnClickListener
+                prefs.accentKey = accent.key
+                // recreate() rebuilds the activity with the new theme,
+                // so every drawable / view that resolves
+                // ?attr/browserAccent retints in one pass. MainActivity
+                // picks up the change on its next onResume via the
+                // boundAccentKey check.
+                recreate()
+            }
+        }
     }
 
     companion object {

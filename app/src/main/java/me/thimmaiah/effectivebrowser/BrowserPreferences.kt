@@ -192,6 +192,17 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         get() = prefs.getBoolean(KEY_NOTIFICATION_PERMISSION_PROMPT_SHOWN, false)
         set(value) = prefs.edit { putBoolean(KEY_NOTIFICATION_PERMISSION_PROMPT_SHOWN, value) }
 
+    /**
+     * v10 user-selectable accent colour. Stored as one of the keys
+     * defined in [AccentTheme]; an unknown value falls back to the
+     * terracotta default at read time so we never paint a missing
+     * theme. Activities call [applyAccentTheme] in onCreate before
+     * setContentView to honour this preference.
+     */
+    var accentKey: String
+        get() = prefs.getString(KEY_ACCENT, AccentTheme.DEFAULT.key) ?: AccentTheme.DEFAULT.key
+        set(value) = prefs.edit { putString(KEY_ACCENT, value) }
+
     companion object {
         private const val PREFS_NAME = "effective_browser_prefs"
 
@@ -217,6 +228,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         private const val KEY_CUSTOM_SEARCH_HOME = "key_custom_search_home"
         private const val KEY_BLOCKLIST_AUTO_UPDATE = "key_blocklist_auto_update"
         private const val KEY_BLOCKLIST_LAST_CHECKED_AT = "key_blocklist_last_checked_at"
+        private const val KEY_ACCENT = "key_accent"
 
         private const val DEFAULT_SEARCH_ENGINE = "duckduckgo"
 

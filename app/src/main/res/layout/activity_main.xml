@@ -91,7 +91,7 @@
                         android:contentDescription="@string/go_button"
                         android:padding="8dp"
                         android:src="@drawable/ic_arrow_forward_24"
-                        app:tint="@color/browser_accent" />
+                        app:tint="?attr/browserAccent" />
                 </LinearLayout>
             </FrameLayout>
 
@@ -117,7 +117,7 @@
             android:max="100"
             android:progress="0"
             android:progressBackgroundTint="@android:color/transparent"
-            android:progressTint="@color/browser_accent"
+            android:progressTint="?attr/browserAccent"
             android:visibility="gone"
             app:layout_scrollFlags="scroll" />
 
@@ -236,6 +236,24 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    <!--
+      v10 start page (about:home). Sibling of web_container so it
+      occupies the same vertical band between AppBar and bottom_chrome;
+      MainActivity flips visibility between this overlay and the
+      WebView based on the active tab's display URL.
+
+      The view is included as a layout reference so all the start-page
+      structure lives in view_start_page.xml — keeping activity_main
+      from ballooning.
+    -->
+    <include
+        android:id="@+id/start_page_overlay"
+        layout="@layout/view_start_page"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior" />
 
     <!--
       v10 full-screen tab-switcher overlay.
@@ -506,12 +524,21 @@
                     android:src="@drawable/ic_tabs_outline_24"
                     app:tint="@color/browser_icon" />
 
+                <!--
+                  v10: badge anchored to the top-right of the icon
+                  rather than the centre. The 8dp margins position
+                  the badge so its lower-left overlaps the icon's
+                  upper-right corner — same anchor pattern as the
+                  Chrome/Brave tab-count badges and the prototype
+                  reference image.
+                -->
                 <TextView
                     android:id="@+id/tab_count_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:layout_marginTop="-2dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginEnd="8dp"
                     android:background="@drawable/bg_tab_badge"
                     android:fontFamily="monospace"
                     android:importantForAccessibility="no"

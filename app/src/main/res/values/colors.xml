@@ -47,4 +47,33 @@
     <color name="avatar_blue">#3F5A8C</color>
     <color name="avatar_amber">#B97A2E</color>
     <color name="avatar_ink">#3A322A</color>
+
+    <!--
+      v10 selectable accent palette. Each accent has a strong fill
+      colour (for buttons, badges, dots) and a soft tint (~14% over
+      paper) used as tinted-card fills. The "terracotta" pair matches
+      the original browser_accent / browser_accent_soft, so the
+      default theme renders identically to the v10 first release.
+
+      Five accents requested by the user prototype:
+        • Burnt Orange / Terracotta (default)
+        • Deep Teal Green
+        • Royal Blue
+        • Deep Purple
+        • Near Black / Charcoal
+    -->
+    <color name="accent_terracotta">#C8533A</color>
+    <color name="accent_terracotta_soft">#F2DDD2</color>
+
+    <color name="accent_teal">#1E6657</color>
+    <color name="accent_teal_soft">#D2E4DE</color>
+
+    <color name="accent_royal_blue">#2D4D88</color>
+    <color name="accent_royal_blue_soft">#D5DDED</color>
+
+    <color name="accent_deep_purple">#5B2D87</color>
+    <color name="accent_deep_purple_soft">#E0D2EC</color>
+
+    <color name="accent_charcoal">#2A241D</color>
+    <color name="accent_charcoal_soft">#D9D2C5</color>
 </resources>

@@ -48,6 +48,7 @@ class BookmarksActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyAccentTheme(BrowserPreferences.from(this))
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_bookmarks)
 

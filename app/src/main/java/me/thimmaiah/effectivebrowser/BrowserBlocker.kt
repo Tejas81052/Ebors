@@ -286,6 +286,13 @@ object BrowserBlocker {
     fun createBlockingResponse(url: String?, isMainFrame: Boolean): WebResourceResponse? {
         val match = findMatch(url, isMainFrame) ?: return null
 
+        // v10 start-page "trackers blocked today" counter. Increment
+        // happens regardless of whether this is the user's site block
+        // list (BLOCKED_SITE) or the built-in ad/tracker list — both
+        // count as "something we kept off your screen" from the user's
+        // perspective.
+        TrackerStats.recordBlock()
+
         return when (match.kind) {
             BlockingKind.BLOCKED_SITE -> {
                 if (isMainFrame) {

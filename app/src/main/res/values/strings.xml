@@ -246,6 +246,45 @@
     <string name="tab_private_url_prefix">Private · %1$s</string>
     <string name="private_mode_unsupported">Private tabs need a newer Android System WebView.</string>
 
+    <!-- v10 accent picker (Settings → Appearance → Accent). -->
+    <string name="setting_accent_title">Accent</string>
+    <string name="setting_accent_summary">Choose the highlight colour used across buttons, links and the active-tab marker.</string>
+    <string name="accent_label_terracotta">Burnt Orange</string>
+    <string name="accent_label_teal">Deep Teal Green</string>
+    <string name="accent_label_royal_blue">Royal Blue</string>
+    <string name="accent_label_deep_purple">Deep Purple</string>
+    <string name="accent_label_charcoal">Near Black</string>
+    <string name="accent_picker_dialog_title">Accent colour</string>
+    <string name="accent_swatch_content_description">%1$s accent</string>
+    <string name="accent_swatch_selected_content_description">%1$s accent, selected</string>
+
+    <!-- v10 start page (about:home). -->
+    <string name="start_page_app_name">EFFECTIVE BROWSER</string>
+    <string name="start_page_date_format">EEE · MMM d</string>
+    <string name="start_page_greeting_morning">Good morning,</string>
+    <string name="start_page_greeting_afternoon">Good afternoon,</string>
+    <string name="start_page_greeting_evening">Good evening,</string>
+    <string name="start_page_greeting_night">Working late,</string>
+    <string name="start_page_greeting_bottom">where would you like to read today?</string>
+    <string name="start_page_search_hint">Search or paste a link</string>
+    <string name="start_page_section_pinned">Pinned</string>
+    <string name="start_page_pinned_edit">EDIT</string>
+    <string name="start_page_section_continue">Continue reading</string>
+    <string name="start_page_history_link">HISTORY ↗</string>
+    <string name="start_page_continue_empty">Nothing recent. Open a page and it lands here.</string>
+    <string name="start_page_continue_reader_ready">reader ready</string>
+    <string name="start_page_continue_meta">%1$s · %2$s</string>
+    <string name="start_page_continue_meta_reader">%1$s · %2$s · </string>
+    <string name="start_page_continue_age_just_now">just now</string>
+    <string name="start_page_continue_age_minutes">%1$d min ago</string>
+    <string name="start_page_continue_age_hour">an hour ago</string>
+    <string name="start_page_continue_age_hours">%1$d hours ago</string>
+    <string name="start_page_continue_age_yesterday">yesterday</string>
+    <string name="start_page_continue_age_days">%1$d days ago</string>
+    <string name="start_page_trackers_summary">%1$s <i>trackers blocked today</i></string>
+    <string name="start_page_trackers_meta">List v%1$d · updated %2$s</string>
+    <string name="start_page_trackers_meta_never">List v%1$d · never checked</string>
+
     <!-- v10 tab switcher overlay. -->
     <string name="tab_switcher_open_tabs_title">%1$d <i>open tabs</i></string>
     <string name="tab_switcher_segment_regular">Regular</string>

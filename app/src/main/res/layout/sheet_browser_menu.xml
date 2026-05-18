@@ -76,13 +76,13 @@
                 android:id="@+id/menu_save_icon"
                 style="@style/BrowserMenuQuickIcon"
                 android:src="@drawable/ic_bookmark_outline_24"
-                app:tint="@color/browser_accent" />
+                app:tint="?attr/browserAccent" />
 
             <TextView
                 android:id="@+id/menu_save_label"
                 style="@style/BrowserMenuQuickLabel"
                 android:text="@string/save_page"
-                android:textColor="@color/browser_accent" />
+                android:textColor="?attr/browserAccent" />
         </LinearLayout>
 
         <LinearLayout

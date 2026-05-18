@@ -22,7 +22,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@android:color/transparent"
-        app:tabIndicatorColor="@color/browser_accent"
+        app:tabIndicatorColor="?attr/browserAccent"
         app:tabSelectedTextColor="@color/browser_text"
         app:tabTextColor="@color/browser_hint">
 

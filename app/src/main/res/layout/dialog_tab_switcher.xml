@@ -44,7 +44,7 @@
             android:contentDescription="@string/new_tab"
             android:padding="10dp"
             android:src="@drawable/ic_add_24"
-            app:tint="@color/browser_accent" />
+            app:tint="?attr/browserAccent" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView

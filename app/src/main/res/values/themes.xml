@@ -1,8 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Base.Theme.EffectiveBrowser" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/browser_accent</item>
+        <!-- Default accent attrs point at terracotta. Each
+             Theme.EffectiveBrowser.Accent* child overrides these
+             to swap the whole chrome's accent colour without
+             touching layouts. -->
+        <item name="browserAccent">@color/accent_terracotta</item>
+        <item name="browserAccentSoft">@color/accent_terracotta_soft</item>
+        <item name="colorPrimary">?attr/browserAccent</item>
         <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/browser_accent</item>
+        <item name="colorSecondary">?attr/browserAccent</item>
         <item name="colorSurface">@color/browser_surface</item>
         <item name="colorOnSurface">@color/browser_text</item>
         <item name="colorOnSurfaceVariant">@color/browser_hint</item>
@@ -13,6 +19,40 @@
     </style>
 
     <style name="Theme.EffectiveBrowser" parent="Base.Theme.EffectiveBrowser" />
+
+    <!--
+      v10 user-selectable accent themes. Activities apply the right
+      one in onCreate based on BrowserPreferences.accentKey; the user
+      switches accents from Settings → Appearance → Accent.
+
+      Only the two accent attrs need overriding; everything else
+      inherits from Base.Theme.EffectiveBrowser so day/night, surface
+      colours, etc. remain consistent.
+    -->
+    <style name="Theme.EffectiveBrowser.AccentTerracotta" parent="Base.Theme.EffectiveBrowser">
+        <item name="browserAccent">@color/accent_terracotta</item>
+        <item name="browserAccentSoft">@color/accent_terracotta_soft</item>
+    </style>
+
+    <style name="Theme.EffectiveBrowser.AccentTeal" parent="Base.Theme.EffectiveBrowser">
+        <item name="browserAccent">@color/accent_teal</item>
+        <item name="browserAccentSoft">@color/accent_teal_soft</item>
+    </style>
+
+    <style name="Theme.EffectiveBrowser.AccentRoyalBlue" parent="Base.Theme.EffectiveBrowser">
+        <item name="browserAccent">@color/accent_royal_blue</item>
+        <item name="browserAccentSoft">@color/accent_royal_blue_soft</item>
+    </style>
+
+    <style name="Theme.EffectiveBrowser.AccentDeepPurple" parent="Base.Theme.EffectiveBrowser">
+        <item name="browserAccent">@color/accent_deep_purple</item>
+        <item name="browserAccentSoft">@color/accent_deep_purple_soft</item>
+    </style>
+
+    <style name="Theme.EffectiveBrowser.AccentCharcoal" parent="Base.Theme.EffectiveBrowser">
+        <item name="browserAccent">@color/accent_charcoal</item>
+        <item name="browserAccentSoft">@color/accent_charcoal_soft</item>
+    </style>
 
     <style name="TextAppearance.EffectiveBrowser.Title" parent="TextAppearance.Material3.TitleLarge">
         <item name="android:textColor">@color/browser_text</item>
