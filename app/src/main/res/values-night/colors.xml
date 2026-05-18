@@ -16,4 +16,16 @@
     <color name="browser_progress_track">#00000000</color>
     <color name="browser_danger">#F0664A</color>
     <color name="browser_success">#82C89B</color>
+
+    <!--
+      Avatar palette is overridden for night mode to keep enough
+      contrast against the dark surface; the private-tab tokens are
+      defined only in values/ because they're theme-invariant.
+    -->
+    <color name="avatar_purple">#8E6FC4</color>
+    <color name="avatar_terracotta">#E26545</color>
+    <color name="avatar_green">#5A9E6E</color>
+    <color name="avatar_blue">#7693C8</color>
+    <color name="avatar_amber">#D9A055</color>
+    <color name="avatar_ink">#C8BFA9</color>
 </resources>

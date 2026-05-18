@@ -238,6 +238,178 @@
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     <!--
+      v10 full-screen tab-switcher overlay.
+
+      Sits between web_container and bottom_chrome in the CoordinatorLayout
+      child order so z-stack is: [web_container] under [overlay] under
+      [bottom_chrome]. The bottom_chrome therefore stays visible on top of
+      the overlay (matching the prototype, where the user can see — and
+      tap — the bottom nav while the switcher is open). The overlay's
+      RecyclerView is given a runtime paddingBottom equal to the
+      bottom_chrome height so the last grid row never hides under it.
+
+      Uses appbar_scrolling_view_behavior so it anchors immediately below
+      the top AppBar — and because MainActivity hides top_chrome while
+      the switcher is up, the overlay effectively starts at the top
+      system inset.
+
+      Default visibility=gone; MainActivity.showTabSwitcher flips it on
+      and TabSwitcherView populates the segmented filter + grid.
+    -->
+    <LinearLayout
+        android:id="@+id/tab_switcher_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/browser_bg_solid"
+        android:orientation="vertical"
+        android:visibility="gone"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Title row: "N open tabs" + accent + button -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="20dp"
+            android:paddingTop="14dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="14dp">
+
+            <TextView
+                android:id="@+id/tab_switcher_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="serif"
+                android:textColor="@color/browser_text"
+                android:textSize="26sp"
+                android:textStyle="italic"
+                tools:text="4 open tabs" />
+
+            <ImageButton
+                android:id="@+id/tab_switcher_new"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:background="@drawable/bg_new_tab_fab"
+                android:contentDescription="@string/tab_switcher_new_tab_button"
+                android:padding="11dp"
+                android:src="@drawable/ic_add_24"
+                app:tint="@color/browser_on_accent" />
+        </LinearLayout>
+
+        <!-- Regular / Private segmented filter -->
+        <LinearLayout
+            android:id="@+id/tab_switcher_segments"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_segment_container"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:orientation="horizontal"
+            android:padding="3dp">
+
+            <LinearLayout
+                android:id="@+id/tab_segment_regular"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_segment_active"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tab_segment_regular_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/tab_switcher_segment_regular"
+                    android:textColor="@color/browser_text"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tab_segment_regular_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/browser_hint"
+                    android:textSize="11sp"
+                    tools:text="4" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tab_segment_private"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/tab_segment_private_icon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_marginEnd="6dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_incognito_24"
+                    app:tint="@color/browser_text_2" />
+
+                <TextView
+                    android:id="@+id/tab_segment_private_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/tab_switcher_segment_private"
+                    android:textColor="@color/browser_text_2"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/tab_segment_private_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/browser_hint"
+                    android:textSize="11sp"
+                    tools:text="2" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Tab grid (2 columns). paddingBottom is set in code so the
+             last row never hides under bottom_chrome. -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/tab_switcher_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:nestedScrollingEnabled="false"
+            android:paddingStart="12dp"
+            android:paddingTop="14dp"
+            android:paddingEnd="12dp"
+            android:scrollbars="vertical" />
+
+        <!-- Empty state (visible when the active segment has no tabs) -->
+        <TextView
+            android:id="@+id/tab_switcher_empty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:textColor="@color/browser_hint"
+            android:textSize="14sp"
+            android:visibility="gone"
+            tools:text="@string/tab_switcher_empty_private" />
+    </LinearLayout>
+
+    <!--
       Bottom chrome group. HideBottomViewOnScrollBehavior translates the
       whole group off-screen on scroll-down and back in on scroll-up
       with the standard Material curve (Brave uses an almost identical
@@ -326,6 +498,7 @@
                 android:focusable="true">
 
                 <ImageView
+                    android:id="@+id/tabs_button_icon"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:importantForAccessibility="no"
@@ -349,6 +522,21 @@
                     android:textSize="10sp"
                     android:textStyle="bold"
                     tools:text="2" />
+
+                <!--
+                  Active-state indicator dot under the tabs icon. Painted
+                  when the tab switcher overlay is open so the user can
+                  tell at a glance which surface they're on. Visibility
+                  toggled in MainActivity.setTabSwitcherActiveIndicator.
+                -->
+                <View
+                    android:id="@+id/tabs_button_active_dot"
+                    android:layout_width="5dp"
+                    android:layout_height="5dp"
+                    android:layout_gravity="center_horizontal|bottom"
+                    android:layout_marginBottom="2dp"
+                    android:background="@drawable/bg_tab_active_dot"
+                    android:visibility="gone" />
             </FrameLayout>
 
             <ImageButton

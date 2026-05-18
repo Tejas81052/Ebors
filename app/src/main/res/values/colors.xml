@@ -18,4 +18,33 @@
     <color name="browser_progress_track">#00000000</color>
     <color name="browser_danger">#B53219</color>
     <color name="browser_success">#2A6A3C</color>
+
+    <!--
+      Private-tab card palette. These deliberately do NOT have day/night
+      variants — private cards stay ink-coloured in both themes so the
+      "this tab is incognito" signal is theme-invariant. The values
+      mirror the dark-theme browser_* tokens but are pinned here so a
+      future tweak to the night palette can't quietly change how private
+      tabs look in light mode.
+    -->
+    <color name="tab_private_bg">#1F1A14</color>
+    <color name="tab_private_surface">#2A241D</color>
+    <color name="tab_private_stroke">#3F372D</color>
+    <color name="tab_private_text">#F0E8D8</color>
+    <color name="tab_private_text_2">#C8BFA9</color>
+    <color name="tab_private_hint">#9C907B</color>
+    <color name="tab_private_faint">#6C6354</color>
+
+    <!--
+      Default avatar palette for the favicon letter chips in the tab
+      switcher cards. AvatarPalette in TabSwitcherView hashes the
+      hostname to pick one of these so the same site always lands on the
+      same colour without us having to persist any state.
+    -->
+    <color name="avatar_purple">#5B3F8C</color>
+    <color name="avatar_terracotta">#C8533A</color>
+    <color name="avatar_green">#2E6B3F</color>
+    <color name="avatar_blue">#3F5A8C</color>
+    <color name="avatar_amber">#B97A2E</color>
+    <color name="avatar_ink">#3A322A</color>
 </resources>

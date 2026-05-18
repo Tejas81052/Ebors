@@ -194,6 +194,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bookmarkButton: ImageButton
     private lateinit var tabsButton: FrameLayout
     private lateinit var tabCountText: TextView
+    /** Small accent dot painted under the tabs icon while the
+     *  tab-switcher overlay is open. Visibility toggled in
+     *  [setTabSwitcherActiveIndicator]. */
+    private lateinit var tabsButtonActiveDot: View
     private lateinit var searchButton: ImageButton
     private lateinit var homeButton: ImageButton
     private lateinit var refreshButton: ImageButton
@@ -254,7 +258,7 @@ class MainActivity : AppCompatActivity() {
      *  WebView is attached to [webContainer]. */
     private val tabs = mutableListOf<Tab>()
     private var activeTabIndex: Int = -1
-    private var tabSwitcherSheet: TabSwitcherSheet? = null
+    private var tabSwitcherView: TabSwitcherView? = null
 
     /**
      * Tab whose runtime permission launcher is currently waiting on an
@@ -574,8 +578,8 @@ class MainActivity : AppCompatActivity() {
         }
         tabs.clear()
         activeTabIndex = -1
-        tabSwitcherSheet?.dismiss()
-        tabSwitcherSheet = null
+        tabSwitcherView?.dismiss()
+        tabSwitcherView = null
         // After all WebViews are destroyed it's safe to delete the
         // private profile. We do this on every onDestroy that saw at
         // least one private tab — including config-change destroys
@@ -683,8 +687,8 @@ class MainActivity : AppCompatActivity() {
         } else {
             tab.pendingLoadUrl = url?.takeUnless { it.isBlank() }
             newWebView.onPause()
-            if (tabSwitcherSheet?.isShowing() == true) {
-                tabSwitcherSheet?.refresh(buildTabSnapshots(), activeTabIndex)
+            if (tabSwitcherView?.isShowing() == true) {
+                tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
             }
         }
         // Refresh the bottom-nav tab-count overlay. switchToTab already
@@ -799,8 +803,8 @@ class MainActivity : AppCompatActivity() {
             activeTabIndex--
         }
 
-        if (tabSwitcherSheet?.isShowing() == true) {
-            tabSwitcherSheet?.refresh(buildTabSnapshots(), activeTabIndex)
+        if (tabSwitcherView?.isShowing() == true) {
+            tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
         }
         // Tab-count overlay must reflect the new size. switchToTab covers
         // the wasActive path; the wasn't-active path needs an explicit
@@ -834,15 +838,72 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Reveal the v10 paper-theme tab switcher overlay over the
+     * WebView area. Hides the top chrome (the overlay paints its own
+     * title row) and flips the bottom-nav tabs button into its
+     * active state (accent badge + dot) so the user can tell at a
+     * glance which surface they're on.
+     *
+     * Show is idempotent: a second tap on the tabs button while the
+     * switcher is already up dismisses it (matches how Chrome /
+     * Brave's tab buttons behave).
+     */
     private fun showTabSwitcher() {
-        val sheet = TabSwitcherSheet(
-            context = this,
-            onSwitchToTab = { id -> switchToTabById(id) },
-            onCloseTab = { id -> closeTabById(id) },
-            onNewTab = { openNewTab(url = homeUrl(), switchTo = true) },
-        )
-        tabSwitcherSheet = sheet
-        sheet.show(buildTabSnapshots(), activeTabIndex)
+        val view = tabSwitcherView ?: return
+        if (view.isShowing()) {
+            view.dismiss()
+            return
+        }
+        // The overlay sits between web_container and bottom_chrome in
+        // the CoordinatorLayout child order so bottom_chrome stays
+        // visually on top. Add runtime bottom padding equal to the
+        // bottom chrome height so the last grid row never hides under
+        // the nav.
+        bottomChrome.post {
+            view.setBottomInset(bottomChrome.height)
+        }
+        // Hide top chrome (address bar + progress) while the switcher
+        // is up — the switcher paints its own "N open tabs" header.
+        topChrome.isVisible = false
+        // Active-state marker on the bottom nav.
+        setTabSwitcherActiveIndicator(active = true)
+        view.show(buildTabSnapshots(), activeTabIndex)
+    }
+
+    /**
+     * Toggle the active-state visual on the bottom-nav tabs button:
+     *  - accent-filled badge (instead of the muted surface chip)
+     *  - small accent dot directly under the icon
+     */
+    private fun setTabSwitcherActiveIndicator(active: Boolean) {
+        if (active) {
+            tabCountText.setBackgroundResource(R.drawable.bg_tab_badge_active)
+            tabCountText.setTextColor(ContextCompat.getColor(this, R.color.browser_on_accent))
+            tabsButtonActiveDot.isVisible = true
+        } else {
+            tabCountText.setBackgroundResource(R.drawable.bg_tab_badge)
+            tabCountText.setTextColor(ContextCompat.getColor(this, R.color.browser_text))
+            tabsButtonActiveDot.isVisible = false
+        }
+    }
+
+    /** Listener handed to [TabSwitcherView]. Implemented as an inner
+     *  object so the activity stays the single source of truth for
+     *  tab-management invariants. */
+    private val tabSwitcherListener = object : TabSwitcherView.Listener {
+        override fun onSwitchToTab(id: String) = switchToTabById(id)
+        override fun onCloseTab(id: String) = closeTabById(id)
+        override fun onNewTab(isPrivate: Boolean) {
+            openNewTab(url = homeUrl(), switchTo = true, isPrivate = isPrivate)
+        }
+        override fun onSwitcherClosed() {
+            // Restore the top chrome and clear the active-state
+            // marker. Done in the host (not the view) because the top
+            // chrome is the activity's concern.
+            topChrome.isVisible = true
+            setTabSwitcherActiveIndicator(active = false)
+        }
     }
 
     /**
@@ -862,7 +923,7 @@ class MainActivity : AppCompatActivity() {
         if (index >= 0) closeTab(index)
     }
 
-    private fun buildTabSnapshots(): List<TabSwitcherSheet.TabSnapshot> {
+    private fun buildTabSnapshots(): List<TabSwitcherView.TabSnapshot> {
         return tabs.map { tab ->
             // Title fallback chain handles background tabs whose
             // WebView has never rendered: displayTitle is set by
@@ -870,12 +931,12 @@ class MainActivity : AppCompatActivity() {
             // is null/empty before first attach. For a still-loading
             // background tab we fall through to the URL — and only
             // ultimately to the localised "New tab" placeholder inside
-            // the switcher (see TabSwitcherSheet.bind), so the row is
+            // the switcher (see TabSwitcherView.bind), so the row is
             // never visually empty.
             val displayTitle = tab.displayTitle.ifBlank { tab.webView.title.orEmpty() }
             val displayUrl = tab.displayUrl.ifBlank { tab.webView.url.orEmpty() }
                 .ifBlank { tab.pendingLoadUrl.orEmpty() }
-            TabSwitcherSheet.TabSnapshot(
+            TabSwitcherView.TabSnapshot(
                 id = tab.id,
                 title = displayTitle,
                 url = displayUrl,
@@ -901,6 +962,7 @@ class MainActivity : AppCompatActivity() {
         bookmarkButton = findViewById(R.id.bookmark_button)
         tabsButton = findViewById(R.id.tabs_button)
         tabCountText = findViewById(R.id.tab_count_text)
+        tabsButtonActiveDot = findViewById(R.id.tabs_button_active_dot)
         searchButton = findViewById(R.id.search_button)
         homeButton = findViewById(R.id.home_button)
         refreshButton = findViewById(R.id.refresh_button)
@@ -914,6 +976,16 @@ class MainActivity : AppCompatActivity() {
         findPrev = findViewById(R.id.find_prev)
         findNext = findViewById(R.id.find_next)
         findClose = findViewById(R.id.find_close)
+
+        // v10 tab-switcher overlay. Constructed once at bind time
+        // because its constructor caches lookups against the overlay's
+        // children — handing it a freshly inflated overlay on every
+        // show would rebuild those each time for no benefit.
+        tabSwitcherView = TabSwitcherView(
+            context = this,
+            overlay = findViewById(R.id.tab_switcher_overlay),
+            listener = tabSwitcherListener,
+        )
     }
 
     private fun applyInsets() {
@@ -1455,8 +1527,8 @@ class MainActivity : AppCompatActivity() {
 
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 tab.displayTitle = title.orEmpty()
-                if (tab === activeTabOrNull && tabSwitcherSheet?.isShowing() == true) {
-                    tabSwitcherSheet?.refresh(buildTabSnapshots(), activeTabIndex)
+                if (tab === activeTabOrNull && tabSwitcherView?.isShowing() == true) {
+                    tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
                 }
             }
 
@@ -2103,6 +2175,14 @@ class MainActivity : AppCompatActivity() {
     private fun configureBackHandling() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                // The tab-switcher overlay takes priority over every
+                // other back target — it occludes the active tab, so
+                // navigating the tab's history while it's up would be
+                // surprising.
+                if (tabSwitcherView?.isShowing() == true) {
+                    tabSwitcherView?.dismiss()
+                    return
+                }
                 if (isInFullscreen()) {
                     exitFullscreen()
                     return

@@ -246,6 +246,17 @@
     <string name="tab_private_url_prefix">Private · %1$s</string>
     <string name="private_mode_unsupported">Private tabs need a newer Android System WebView.</string>
 
+    <!-- v10 tab switcher overlay. -->
+    <string name="tab_switcher_open_tabs_title">%1$d <i>open tabs</i></string>
+    <string name="tab_switcher_segment_regular">Regular</string>
+    <string name="tab_switcher_segment_private">Private</string>
+    <string name="tab_switcher_segment_regular_filter">Show regular tabs</string>
+    <string name="tab_switcher_segment_private_filter">Show private tabs</string>
+    <string name="tab_switcher_new_tab_button">New tab</string>
+    <string name="tab_card_private_label">PRIVATE</string>
+    <string name="tab_switcher_empty_regular">No regular tabs open.</string>
+    <string name="tab_switcher_empty_private">No private tabs open.</string>
+
     <!-- Long-press context menu on links / images inside a page. -->
     <string name="link_action_open_in_new_tab">Open in new tab</string>
     <string name="link_action_open_in_private_tab">Open in private tab</string>
