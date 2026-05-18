@@ -1,8 +1,19 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      Night-mode Base must mirror the day-mode Base in terms of theme
+      attrs that the AccentTeal / AccentRoyalBlue / etc. child themes
+      override. Specifically: colorPrimary / colorSecondary must
+      resolve to ?attr/browserAccent (not @color/browser_accent),
+      otherwise Material-tinted widgets (FAB tints, ripples, switch
+      tracks) keep painting the default terracotta even after the
+      user picks a different accent in Settings.
+    -->
     <style name="Base.Theme.EffectiveBrowser" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/browser_accent</item>
+        <item name="browserAccent">@color/accent_terracotta</item>
+        <item name="browserAccentSoft">@color/accent_terracotta_soft</item>
+        <item name="colorPrimary">?attr/browserAccent</item>
         <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/browser_accent</item>
+        <item name="colorSecondary">?attr/browserAccent</item>
         <item name="colorSurface">@color/browser_surface</item>
         <item name="colorOnSurface">@color/browser_text</item>
         <item name="colorOnSurfaceVariant">@color/browser_hint</item>

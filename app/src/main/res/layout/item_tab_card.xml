@@ -86,12 +86,35 @@
                 app:tint="@color/browser_hint" />
         </LinearLayout>
 
-        <!-- Thumbnail body: skeleton (regular) or incognito glyph (private) -->
+        <!-- Thumbnail body: live screenshot (when available),
+             skeleton (regular tab, no capture yet), or incognito
+             glyph (private tab). Exactly one of the three child
+             groups is visible at any given time; TabSwitcherView
+             picks via setVisibility in bind(). -->
         <FrameLayout
             android:id="@+id/tab_thumbnail"
             android:layout_width="match_parent"
             android:layout_height="130dp"
-            android:background="@drawable/bg_tab_thumbnail">
+            android:background="@drawable/bg_tab_thumbnail"
+            android:clipChildren="true"
+            android:clipToOutline="true">
+
+            <!--
+              v10.1: live WebView screenshot, painted ahead of the
+              skeleton / private placeholders. centerCrop fills the
+              card body the same way Brave's tab cards do — the
+              top-left of the page is anchored and excess height is
+              trimmed off the bottom (which is where chrome / overlay
+              UI tends to live, so the trim usually shaves visual
+              noise rather than the article).
+            -->
+            <ImageView
+                android:id="@+id/tab_thumbnail_image"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:importantForAccessibility="no"
+                android:scaleType="matrix"
+                android:visibility="gone" />
 
             <!-- Skeleton placeholder for regular tabs -->
             <LinearLayout

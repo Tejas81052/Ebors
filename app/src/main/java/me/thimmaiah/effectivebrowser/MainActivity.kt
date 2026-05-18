@@ -765,6 +765,13 @@ class MainActivity : AppCompatActivity() {
         val previousActive = if (activeTabIndex in tabs.indices) tabs[activeTabIndex] else null
 
         previousActive?.let {
+            // v10.1: capture the WebView's current pixels as a tab-
+            // switcher thumbnail *before* detaching. The WebView is
+            // still attached and laid out at this point, so
+            // `webView.draw(canvas)` paints the actual visible content;
+            // a moment later we remove the view and the surface goes
+            // blank. captureThumbnail is a no-op on private tabs.
+            it.captureThumbnail()
             webHost.removeView(it.webView)
             it.webView.onPause()
         }
@@ -918,6 +925,12 @@ class MainActivity : AppCompatActivity() {
             view.dismiss()
             return
         }
+        // v10.1: capture a fresh thumbnail of the *currently active*
+        // tab before its WebView is occluded by the overlay. switchToTab
+        // covers the "user switches away" case; this covers the "user
+        // opens the switcher straight from the active tab" case.
+        // captureThumbnail is a no-op on private tabs.
+        activeTabOrNull?.captureThumbnail()
         // The overlay sits between web_container and bottom_chrome in
         // the CoordinatorLayout child order so bottom_chrome stays
         // visually on top. Add runtime bottom padding equal to the
@@ -1051,6 +1064,11 @@ class MainActivity : AppCompatActivity() {
                 title = displayTitle,
                 url = displayUrl,
                 isPrivate = tab.isPrivate,
+                // v10.1: live tab-card preview. Null until captureThumbnail
+                // has run for this tab (switchToTab on detach, or
+                // showTabSwitcher for the active tab). The card layout
+                // falls back to the skeleton placeholder for nulls.
+                thumbnail = tab.thumbnail,
             )
         }
     }
@@ -2972,6 +2990,30 @@ class MainActivity : AppCompatActivity() {
         val accent = resolveThemeColor(R.attr.browserAccent)
         saveLabel.setTextColor(accent)
         saveIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
+
+        // v10.1: Desktop tile carries the same active-state visual
+        // language as Save — accent-soft fill + accent-tinted icon /
+        // label when desktop mode is currently on. Without this the
+        // user couldn't tell whether a tap had toggled desktop on or
+        // off (only the toast confirmed it), which is the bug the
+        // user filed.
+        val desktopTile: LinearLayout = view.findViewById(R.id.menu_desktop)
+        val desktopIcon: ImageView = view.findViewById(R.id.menu_desktop_icon)
+        val desktopLabel: TextView = view.findViewById(R.id.menu_desktop_label)
+        val desktopOn = prefs.desktopMode
+        desktopTile.setBackgroundResource(
+            if (desktopOn) R.drawable.bg_menu_quick_action_selected
+            else R.drawable.bg_menu_quick_action,
+        )
+        if (desktopOn) {
+            desktopIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
+            desktopLabel.setTextColor(accent)
+        } else {
+            desktopIcon.imageTintList = android.content.res.ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.browser_icon),
+            )
+            desktopLabel.setTextColor(ContextCompat.getColor(this, R.color.browser_text))
+        }
 
         setMenuTileEnabled(view.findViewById(R.id.menu_share), hasPage)
         setMenuTileEnabled(saveTile, hasPage)

@@ -59,6 +59,11 @@ class TabSwitcherView(
         val title: String,
         val url: String,
         val isPrivate: Boolean = false,
+        /** v10.1 live tab thumbnail. Captured by Tab.captureThumbnail()
+         *  in MainActivity.switchToTab / showTabSwitcher; null until a
+         *  capture has run for this tab. Private tabs always carry null
+         *  here — the card paints the incognito placeholder instead. */
+        val thumbnail: android.graphics.Bitmap? = null,
     )
 
     interface Listener {
@@ -323,6 +328,7 @@ class TabSwitcherView(
             private val titleView: TextView = itemView.findViewById(R.id.tab_title)
             private val closeButton: ImageButton = itemView.findViewById(R.id.tab_close)
             private val thumbnail: View = itemView.findViewById(R.id.tab_thumbnail)
+            private val thumbnailImage: ImageView = itemView.findViewById(R.id.tab_thumbnail_image)
             private val skeletonGroup: View = itemView.findViewById(R.id.tab_skeleton_group)
             private val privateGroup: View = itemView.findViewById(R.id.tab_private_group)
             private val hostView: TextView = itemView.findViewById(R.id.tab_host)
@@ -338,9 +344,22 @@ class TabSwitcherView(
                 // variants of every relevant drawable / colour exist
                 // so we can switch wholesale here without re-laying
                 // out the view holder.
+                //
+                // Three thumbnail states (exactly one painted):
+                //   • Live screenshot (regular tab, captureThumbnail
+                //     has run) → tab_thumbnail_image visible, matrix
+                //     anchored top-left so the page top is what shows
+                //   • Skeleton bars (regular tab, never captured) →
+                //     tab_skeleton_group visible (boot / first-load
+                //     placeholder)
+                //   • Incognito glyph (private tab) → tab_private_group
+                //     visible, ink-coloured chrome
+                val liveBitmap = snapshot.thumbnail?.takeIf { !it.isRecycled }
                 if (snapshot.isPrivate) {
                     root.setBackgroundResource(R.drawable.bg_tab_card_private)
                     thumbnail.setBackgroundResource(R.drawable.bg_tab_thumbnail_private)
+                    thumbnailImage.setImageDrawable(null)
+                    thumbnailImage.isVisible = false
                     skeletonGroup.isVisible = false
                     privateGroup.isVisible = true
                     titleView.setTextColor(
@@ -355,8 +374,17 @@ class TabSwitcherView(
                 } else {
                     root.setBackgroundResource(R.drawable.bg_tab_card)
                     thumbnail.setBackgroundResource(R.drawable.bg_tab_thumbnail)
-                    skeletonGroup.isVisible = true
                     privateGroup.isVisible = false
+                    if (liveBitmap != null) {
+                        skeletonGroup.isVisible = false
+                        thumbnailImage.isVisible = true
+                        thumbnailImage.setImageBitmap(liveBitmap)
+                        applyFitWidthTopMatrix(thumbnailImage, liveBitmap)
+                    } else {
+                        thumbnailImage.setImageDrawable(null)
+                        thumbnailImage.isVisible = false
+                        skeletonGroup.isVisible = true
+                    }
                     titleView.setTextColor(
                         ContextCompat.getColor(ctx, R.color.browser_text),
                     )
@@ -383,6 +411,45 @@ class TabSwitcherView(
 
                 root.setOnClickListener { onCardClicked(snapshot.id) }
                 closeButton.setOnClickListener { onCloseClicked(snapshot.id) }
+            }
+
+            /**
+             * Scale the thumbnail bitmap to fill the ImageView's width,
+             * anchored top-left, with bottom overflow clipped. This is
+             * the Brave-style "show the top of the page" framing — a
+             * plain centerCrop would scale to fill height too and
+             * crop a horizontal strip from the middle, which on a
+             * tall WebView screenshot misses the article header / nav.
+             *
+             * The first bind after `notifyDataSetChanged` can fire
+             * before the RecyclerView has laid the view out (width =
+             * 0), so we fall back to a one-shot OnPreDrawListener that
+             * applies the matrix as soon as the width is known, then
+             * removes itself.
+             */
+            private fun applyFitWidthTopMatrix(image: ImageView, bitmap: android.graphics.Bitmap) {
+                fun apply(): Boolean {
+                    val viewW = image.width
+                    val bmW = bitmap.width
+                    if (viewW <= 0 || bmW <= 0) return false
+                    val scale = viewW.toFloat() / bmW.toFloat()
+                    val matrix = android.graphics.Matrix()
+                    matrix.setScale(scale, scale)
+                    image.imageMatrix = matrix
+                    return true
+                }
+                if (!apply()) {
+                    image.viewTreeObserver.addOnPreDrawListener(
+                        object : android.view.ViewTreeObserver.OnPreDrawListener {
+                            override fun onPreDraw(): Boolean {
+                                if (apply()) {
+                                    image.viewTreeObserver.removeOnPreDrawListener(this)
+                                }
+                                return true
+                            }
+                        },
+                    )
+                }
             }
 
             private fun extractHost(url: String): String {

@@ -1,5 +1,7 @@
 package me.thimmaiah.effectivebrowser
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import androidx.webkit.ScriptHandler
@@ -91,7 +93,72 @@ class Tab(
     /** Bitmask of the privacy document-start preferences installed above. */
     var privacyDocumentStartFlags: Int = DOCUMENT_START_FLAGS_UNSET
 
+    /**
+     * Downscaled bitmap of the WebView's last visible state, painted
+     * inside the tab-switcher card so the user sees real page content
+     * instead of skeleton placeholders.
+     *
+     * Captured by [captureThumbnail] right before the WebView is
+     * detached from the foreground slot (in `MainActivity.switchToTab`)
+     * and when the switcher is first opened (in
+     * `MainActivity.showTabSwitcher`). Private tabs deliberately keep
+     * this null — `TabSwitcherView` paints the incognito-glyph
+     * placeholder for them so an attacker who watches the switcher
+     * never sees a private page's frame.
+     */
+    var thumbnail: Bitmap? = null
+        private set
+
     private var destroyed: Boolean = false
+
+    /**
+     * Render the WebView into a downscaled ARGB_8888 bitmap and
+     * store it on [thumbnail]. The previous bitmap (if any) is
+     * recycled before being replaced so we don't accumulate native
+     * heap pressure across rapid tab switches.
+     *
+     * No-op when:
+     *  - the tab is private (privacy carve-out — see [thumbnail])
+     *  - the WebView has never been laid out (zero width/height —
+     *    happens for background-opened tabs whose first activation
+     *    hasn't fired yet)
+     *  - the tab has been [destroy]ed (the WebView is gone)
+     *
+     * `webView.draw(canvas)` must be called on the UI thread; the
+     * 400 px target keeps a single render cheap (single-digit ms in
+     * practice).
+     */
+    fun captureThumbnail(): Bitmap? {
+        if (destroyed || isPrivate) return null
+        val w = webView.width
+        val h = webView.height
+        if (w <= 0 || h <= 0) return null
+
+        val targetWidth = THUMBNAIL_WIDTH_PX
+        val targetHeight = (h.toFloat() / w.toFloat() * targetWidth).toInt().coerceAtLeast(1)
+        val bitmap = try {
+            Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        } catch (_: OutOfMemoryError) {
+            return null
+        }
+        val canvas = Canvas(bitmap)
+        val scale = targetWidth.toFloat() / w.toFloat()
+        canvas.scale(scale, scale)
+        webView.draw(canvas)
+
+        // Swap in the new bitmap. We deliberately do NOT recycle the
+        // previous one here — a recently-shown tab-switcher card may
+        // still hold a BitmapDrawable backed by it (in a recycled
+        // view-holder waiting for the next bind, or mid-fade-out).
+        // Recycling under that drawable would crash the very next
+        // draw with `Canvas: trying to use a recycled bitmap`.
+        // The old bitmap is unreferenced once this assignment lands
+        // and any drawables release it; GC handles native pixel
+        // memory on Android 8+. We DO recycle in [destroy] where we
+        // know the tab + its UI are gone.
+        thumbnail = bitmap
+        return bitmap
+    }
 
     /**
      * Tear down the WebView and resolve any in-flight permission prompts as
@@ -108,6 +175,15 @@ class Tab(
         pendingGeolocation?.let { it.callback.invoke(it.origin, false, false) }
         pendingGeolocation = null
         removeDocumentStartScripts()
+        // Drop the thumbnail reference; we deliberately do NOT call
+        // recycle() because a tab-switcher card in the middle of a
+        // close-animation may still hold a BitmapDrawable backed by
+        // this bitmap, and `Canvas: trying to use a recycled bitmap`
+        // crashes the very next draw. Native pixel memory for an
+        // ARGB_8888 bitmap lives on the Java heap on API 26+
+        // (minSdk is 29), so GC handles cleanup once the last
+        // reference goes away on its own.
+        thumbnail = null
         webView.stopLoading()
         webView.destroy()
     }
@@ -132,5 +208,11 @@ class Tab(
 
     companion object {
         const val DOCUMENT_START_FLAGS_UNSET = -1
+
+        /** Target width (in px) of the captured tab-switcher
+         *  thumbnail. 400 px lands roughly one-and-a-half times the
+         *  card's display width on a 1080p phone — enough to look
+         *  crisp without bloating the heap. */
+        private const val THUMBNAIL_WIDTH_PX = 400
     }
 }

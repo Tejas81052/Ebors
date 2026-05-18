@@ -95,12 +95,18 @@
             style="@style/BrowserMenuQuickAction"
             android:layout_marginStart="10dp">
 
+            <!-- v10.1: icon + label get IDs so showBrowserMenu can
+                 flip them to an accent-tinted "active" state when
+                 desktop mode is currently on, the same way the Save
+                 tile flips when the page is bookmarked. -->
             <ImageView
+                android:id="@+id/menu_desktop_icon"
                 style="@style/BrowserMenuQuickIcon"
                 android:src="@drawable/ic_desktop_24"
                 app:tint="@color/browser_icon" />
 
             <TextView
+                android:id="@+id/menu_desktop_label"
                 style="@style/BrowserMenuQuickLabel"
                 android:text="@string/setting_desktop_mode_title" />
         </LinearLayout>
