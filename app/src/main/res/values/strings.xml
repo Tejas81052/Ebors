@@ -111,8 +111,8 @@
 
     <string name="setting_desktop_mode_title">Desktop site</string>
     <string name="setting_desktop_mode_summary">Use a desktop user agent and viewport.</string>
-    <string name="setting_force_dark_title">Force dark on web pages</string>
-    <string name="setting_force_dark_summary">Apply a dark theme to sites that don\'t provide one.</string>
+    <string name="setting_force_dark_title">Dark mode</string>
+    <string name="setting_force_dark_summary">Apply a dark theme to web pages that don\'t provide one. On by default.</string>
     <string name="setting_search_engine_title">Default search engine</string>
     <string name="setting_ad_block_title">Block ads &amp; trackers</string>
     <string name="setting_ad_block_summary">Filter known ad networks and tracking pixels.</string>
@@ -221,6 +221,7 @@
     <string name="setting_privacy_policy_summary">What Ebors does and doesn\'t collect.</string>
     <string name="setting_terms_title">Terms of use</string>
     <string name="setting_terms_summary">Conditions of using Ebors.</string>
+    <string name="about_section_legal">Legal</string>
 
     <!-- First-launch onboarding (WelcomeActivity) -->
     <string name="welcome_eyebrow">Welcome</string>

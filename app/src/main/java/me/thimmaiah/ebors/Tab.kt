@@ -86,6 +86,16 @@ class Tab(
     var pendingLoadUrl: String? = null
 
     /**
+     * Set by [MainActivity.applyPreferences] when a visual-mode pref
+     * (desktop UA, force dark, WebRTC block, referrer policy) flips
+     * while this tab was in the background. The reload itself happens
+     * lazily on the next [MainActivity.switchToTab] so a Settings
+     * round-trip doesn't freeze the UI re-fetching every open tab.
+     * The activity clears this immediately after consuming.
+     */
+    var pendingReloadOnActivate: Boolean = false
+
+    /**
      * Once-per-load latch for the "this page is HTTP" warning snackbar. Was
      * previously a field on MainActivity, which meant flipping to a new
      * insecure tab didn't re-warn. Per-tab makes the warning fire exactly

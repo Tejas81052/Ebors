@@ -213,6 +213,11 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         }
 
+        // About card carries just the app name and version here; tapping
+        // it opens AboutActivity, which is the home of the longer
+        // copyright / engine / known-limitation notes and the
+        // Privacy / Terms / Open-source-licenses links. Keeping the
+        // Settings list short is the whole point of this consolidation.
         val versionLabel = findViewById<TextView>(R.id.about_version)
         val versionName = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0"
@@ -221,30 +226,8 @@ class SettingsActivity : AppCompatActivity() {
         }
         versionLabel.text = getString(R.string.about_version_label, versionName)
 
-        findViewById<View>(R.id.row_open_source_licenses).setOnClickListener {
-            startActivity(Intent(this, OpenSourceLicensesActivity::class.java))
-        }
-
-        // Privacy / Terms rows open the hosted URLs in whichever
-        // browser the user has set as default — Ebors itself if
-        // they've made it default, otherwise the system default.
-        // We deliberately don't load them inside a local WebView
-        // here so the URL bar shows the real source (thimmaiah.me)
-        // and so a stale local copy can never be served if the
-        // hosted policy changes between app releases.
-        findViewById<View>(R.id.row_privacy_policy).setOnClickListener {
-            openExternalUrl(WelcomeActivity.PRIVACY_POLICY_URL)
-        }
-        findViewById<View>(R.id.row_terms).setOnClickListener {
-            openExternalUrl(WelcomeActivity.TERMS_OF_USE_URL)
-        }
-    }
-
-    private fun openExternalUrl(url: String) {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, R.string.unsupported_link_message, Toast.LENGTH_SHORT).show()
+        findViewById<View>(R.id.row_about).setOnClickListener {
+            startActivity(Intent(this, AboutActivity::class.java))
         }
     }
 

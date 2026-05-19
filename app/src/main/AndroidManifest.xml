@@ -85,6 +85,11 @@
             android:exported="false"
             android:label="@string/open_source_licenses_title" />
 
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false"
+            android:label="@string/about_app_title" />
+
         <!--
           First-launch onboarding (Welcome / Privacy / Default browser).
           Not exported — only MainActivity launches it, on cold start

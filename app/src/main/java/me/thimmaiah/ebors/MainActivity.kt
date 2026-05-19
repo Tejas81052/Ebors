@@ -231,6 +231,33 @@ class MainActivity : AppCompatActivity() {
     private var scrollDirAccumPx = 0
     private var chromeAnimGateUntilMs = 0L
 
+    // Inactivity-driven auto-hide. The scroll heuristic above only
+    // hides the chrome when the user actively scrolls down — that
+    // never happens on a YouTube Shorts page (swipe-to-page doesn't
+    // generate WebView scrollY deltas) so the chrome used to stay
+    // visible forever there, eating viewport.
+    //
+    // The inactivity timer is a simpler, scheme-independent fix:
+    //  - Reset on every touch and every scroll event.
+    //  - When chrome is visible and the timer expires (4 s of no
+    //    user interaction), hide both bars.
+    //  - When the user touches the screen again, [dispatchTouchEvent]
+    //    re-reveals the chrome and re-arms the timer.
+    //  - Address-bar focus, find-bar visibility, tab-switcher overlay,
+    //    and fullscreen mode all cancel the timer so chrome can't
+    //    auto-hide out from under the user mid-task.
+    private val inactivityHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val inactivityHider = Runnable {
+        // Defensive: only hide if we're still in "show" state and
+        // nothing is actively claiming the chrome (address bar focused,
+        // find bar open, tab switcher up). The schedule sites already
+        // check these, but a race could in principle land us here with
+        // one of them flipped — bail out gracefully.
+        if (!chromeHidden && shouldAutoHide()) {
+            setChromeHidden(true)
+        }
+    }
+
     /**
      * Set from JS (via [RefreshGuardBridge]) when the user's finger is
      * down on an element that scrolls / pages on its own — e.g. a
@@ -487,6 +514,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // Fill in any "default on" toggles that the user has never
+        // touched yet — covers existing installs upgrading to a build
+        // where a new toggle became default-on. Idempotent and never
+        // overrides an explicit user choice (see [bootstrapDefaults]
+        // KDoc). Has to run before applyPreferences below reads them.
+        prefs.bootstrapDefaults()
+
         applyAccentTheme(prefs)
         boundAccentKey = prefs.accentKey
 
@@ -676,6 +710,10 @@ class MainActivity : AppCompatActivity() {
         // activeTabOrNull to call findAllAsync on a torn-down view.
         findDebounceHandler.removeCallbacksAndMessages(null)
         findDebounceRunnable = null
+        // Same hygiene for the inactivity-hide runnable — a pending
+        // post that fires after onDestroy would call setChromeHidden
+        // on torn-down views.
+        inactivityHandler.removeCallbacksAndMessages(null)
         val hadPrivateTabs = tabs.any { it.isPrivate }
         // Detach the active tab's WebView from the container *before*
         // destroying. The platform docs are explicit: "destroy() should
@@ -863,6 +901,18 @@ class MainActivity : AppCompatActivity() {
             target.pendingLoadUrl = null
             target.webView.loadUrl(deferredUrl)
         }
+        // Lazy reload after a visual-mode pref flipped while this tab
+        // was backgrounded (Desktop UA, force dark, etc.). Consumed
+        // once. The pendingLoadUrl branch above takes priority — a
+        // pending fresh load implies the page hasn't rendered with the
+        // old UA yet, so there's nothing to reload.
+        if (target.pendingReloadOnActivate && target.pendingLoadUrl == null) {
+            target.pendingReloadOnActivate = false
+            if (target.webView.url != null) target.webView.reload()
+        } else if (target.pendingReloadOnActivate) {
+            // Pending load consumed it implicitly; just clear the flag.
+            target.pendingReloadOnActivate = false
+        }
 
         // v10: about:home tabs paint the start-page overlay instead of
         // a real WebView page. Toggle the overlay before address-bar /
@@ -890,6 +940,11 @@ class MainActivity : AppCompatActivity() {
         hideFindBar()
         scrollDirAccumPx = 0
         setChromeHidden(false)
+        // Re-arm explicitly: setChromeHidden(false) returns early when
+        // the chrome was already visible, in which case the schedule
+        // call inside it never runs. Doing it here guarantees the
+        // inactivity timer is live on every tab switch.
+        scheduleAutoHide()
         // The suppress-refresh flag belongs to whichever WebView was
         // being touched in the *previous* tab. Switching tabs means we
         // start fresh: pull-to-refresh allowed until the new tab's
@@ -1019,6 +1074,9 @@ class MainActivity : AppCompatActivity() {
         topChrome.isVisible = false
         // Active-state marker on the bottom nav.
         setTabSwitcherActiveIndicator(active = true)
+        // While the switcher overlay is up, the chrome is the user's
+        // only way back out. Don't let the inactivity timer eat it.
+        cancelAutoHide()
         view.show(buildTabSnapshots(), activeTabIndex)
     }
 
@@ -1101,6 +1159,9 @@ class MainActivity : AppCompatActivity() {
             // chrome is the activity's concern.
             topChrome.isVisible = true
             setTabSwitcherActiveIndicator(active = false)
+            // Re-arm the inactivity hider now that the user is back on
+            // the active tab.
+            scheduleAutoHide()
         }
     }
 
@@ -1254,6 +1315,10 @@ class MainActivity : AppCompatActivity() {
 
         addressBar.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
+                // While the user is in the address bar we never want
+                // the chrome to auto-hide — the input itself lives in
+                // the top chrome, hiding it mid-typing is hostile.
+                cancelAutoHide()
                 addressBar.setText(currentAddressUrl())
                 addressBar.post {
                     addressBar.selectAll()
@@ -1266,6 +1331,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }, ADDRESS_SUGGESTION_DISMISS_DELAY_MS)
                 renderAddressBar(currentAddressUrl())
+                // Focus left → resume the regular auto-hide cadence.
+                scheduleAutoHide()
             }
         }
 
@@ -1474,6 +1541,8 @@ class MainActivity : AppCompatActivity() {
         findCount.text = ""
         getSystemService<InputMethodManager>()
             ?.showSoftInput(findInput, InputMethodManager.SHOW_IMPLICIT)
+        // Find bar lives inside the chrome — don't auto-hide it.
+        cancelAutoHide()
     }
 
     private fun hideFindBar() {
@@ -1483,6 +1552,8 @@ class MainActivity : AppCompatActivity() {
         findCount.text = ""
         getSystemService<InputMethodManager>()
             ?.hideSoftInputFromWindow(findInput.windowToken, 0)
+        // Find bar gone → resume the normal auto-hide cadence.
+        scheduleAutoHide()
     }
 
     /**
@@ -2107,8 +2178,20 @@ class MainActivity : AppCompatActivity() {
             lastForceDark = prefs.forceDark
             lastBlockWebRtc = prefs.blockWebRtc
             lastTrimReferrer = prefs.trimReferrer
+            // Previously this reloaded every open tab in a tight loop,
+            // which froze the UI for hundreds of milliseconds on the
+            // Desktop-site toggle when the user had many tabs open.
+            // Now: reload the active tab immediately (the user wants
+            // *that* page to reflow right away), and mark background
+            // tabs as "stale UA" so they reload lazily the next time
+            // they're brought to the foreground via switchToTab.
+            val activeTab = activeTabOrNull
             for (tab in tabs) {
-                if (tab.webView.url != null) tab.webView.reload()
+                if (tab === activeTab) {
+                    if (tab.webView.url != null) tab.webView.reload()
+                } else {
+                    tab.pendingReloadOnActivate = true
+                }
             }
         }
     }
@@ -2377,6 +2460,11 @@ class MainActivity : AppCompatActivity() {
      * own re-layout during the collapse doesn't bounce us back.
      */
     private fun onWebScroll(scrollY: Int, dy: Int) {
+        // Any scroll is fresh user activity — bump the inactivity timer
+        // so a slow-but-continuous reader doesn't get the chrome ripped
+        // out from under them on a pause.
+        scheduleAutoHide()
+
         // SystemClock.uptimeMillis() is monotonic and unaffected by
         // wall-clock changes (NITZ, user setting). System.currentTimeMillis
         // here would let a backward clock jump pin the gate "in the
@@ -2423,6 +2511,68 @@ class MainActivity : AppCompatActivity() {
                 bottomBehavior.slideIn(bottomChrome)
             }
         }
+        // Hidden state: cancel the pending inactivity hide (it just
+        // fired or is moot). Shown state: re-arm so the chrome will
+        // auto-hide again after the next 4 s of quiet.
+        if (hidden) cancelAutoHide() else scheduleAutoHide()
+    }
+
+    // ---------------------------------------------------------------------
+    // Inactivity-driven chrome auto-hide
+    // ---------------------------------------------------------------------
+
+    /**
+     * Predicates that disqualify the chrome from being auto-hidden.
+     * Hiding any of these out from under the user is disorienting:
+     *  - the address bar is focused (mid-typing or about to be);
+     *  - the find-in-page bar is open (the chrome owns the find UI);
+     *  - the tab-switcher overlay is showing (chrome supports its
+     *    "N tabs" header and bottom-nav glyph state);
+     *  - the WebView has gone fullscreen (chrome is already detached);
+     *  - or there's no active tab to drive any of this in the first place.
+     */
+    private fun shouldAutoHide(): Boolean {
+        if (!::addressBar.isInitialized) return false
+        if (addressBar.hasFocus()) return false
+        if (::findBar.isInitialized && findBar.isVisible) return false
+        if (tabSwitcherView?.isShowing() == true) return false
+        if (isInFullscreen()) return false
+        if (activeTabOrNull == null) return false
+        return true
+    }
+
+    /**
+     * (Re)start the 4-second inactivity timer. Posts the [inactivityHider]
+     * runnable to the main thread, cancelling any prior post. Cheap to
+     * call on every touch / scroll.
+     */
+    private fun scheduleAutoHide() {
+        inactivityHandler.removeCallbacks(inactivityHider)
+        if (!shouldAutoHide()) return
+        inactivityHandler.postDelayed(inactivityHider, INACTIVITY_HIDE_MS)
+    }
+
+    /** Cancel the pending auto-hide. Idempotent. */
+    private fun cancelAutoHide() {
+        inactivityHandler.removeCallbacks(inactivityHider)
+    }
+
+    /**
+     * Touch dispatcher hook. Every finger-down on the activity is treated
+     * as fresh user activity: it re-reveals the chrome if it was hidden
+     * and re-arms the inactivity timer. We intentionally only act on
+     * ACTION_DOWN — ACTION_MOVE fires hundreds of times during a scroll
+     * gesture and would jitter our reveal logic; ACTION_UP is too late.
+     *
+     * Always returns the super result so the underlying view tree gets
+     * the event unmodified.
+     */
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
+        if (ev?.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            if (chromeHidden) setChromeHidden(false)
+            scheduleAutoHide()
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     /**
@@ -3772,6 +3922,16 @@ class MainActivity : AppCompatActivity() {
         // (~300 ms) so transient WebView scroll deltas during the
         // animation can't toggle the chrome back.
         private const val CHROME_ANIM_GATE_MS = 350L
+
+        /**
+         * How long the chrome lingers after the last user interaction
+         * before the inactivity timer hides it. Tuned long enough that
+         * a brief read-pause doesn't trigger it (4 s is roughly the
+         * cadence of "look at the URL, then back to content") but
+         * short enough that a YouTube Shorts viewer gets full viewport
+         * within one watched clip.
+         */
+        private const val INACTIVITY_HIDE_MS = 4_000L
 
         /** Empirically about the longest gap that still feels responsive
          *  while collapsing the per-keystroke `findAllAsync` cost. */

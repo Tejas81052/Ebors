@@ -100,6 +100,12 @@ class WelcomeActivity : AppCompatActivity() {
         }
         acceptButton.setOnClickListener {
             prefs.termsAcceptedAt = System.currentTimeMillis()
+            // Stamp the "on by default" toggles to disk explicitly so a
+            // future read can't fall back to a different in-code default
+            // and silently flip the user's settings on them. This is the
+            // first-launch bootstrap pass; the user can still toggle any
+            // of them off later from Settings.
+            prefs.bootstrapDefaults()
             // Onboarding is logically complete now — the default-browser
             // step is optional. Flip the flag here so the user is
             // never re-prompted even if they kill the app on page 3.

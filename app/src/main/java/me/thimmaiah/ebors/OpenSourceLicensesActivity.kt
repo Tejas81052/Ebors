@@ -1,26 +1,23 @@
 /*
  * Copyright 2025 Tejas Thimmaiah
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * All rights reserved. This source file is part of Ebors.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Third-party libraries shipped inside the Ebors APK retain their own
+ * licenses; this activity is what surfaces them at runtime.
  */
 package me.thimmaiah.ebors
 
+import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Bundle
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import com.google.android.material.appbar.MaterialToolbar
 
 /**
@@ -31,9 +28,19 @@ import com.google.android.material.appbar.MaterialToolbar
  *
  * The WebView here is locked down: JavaScript off, no file/content access,
  * no DOM storage. It only renders a static asset.
+ *
+ * Theme: we let the HTML's `prefers-color-scheme: dark` media query do the
+ * heavy lifting, but Android's system WebView does not by default report
+ * the system's dark setting to web content (only Chrome does). We opt in
+ * explicitly via [WebSettingsCompat.setAlgorithmicDarkeningAllowed] when
+ * available, and fall back to the deprecated FORCE_DARK API on older
+ * WebView builds — same belt-and-braces pattern used by MainActivity's
+ * force-dark path. The WebView background is also painted to match the
+ * activity's surface so the first frame doesn't flash white.
  */
 class OpenSourceLicensesActivity : AppCompatActivity() {
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         val prefs = BrowserPreferences.from(this)
         applyAccentTheme(prefs)
@@ -59,6 +66,29 @@ class OpenSourceLicensesActivity : AppCompatActivity() {
             allowContentAccess = false
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
+
+        // Tell WebView to honour the system dark setting so the
+        // HTML's prefers-color-scheme: dark CSS branch actually fires.
+        // ALGORITHMIC_DARKENING is the modern API; FORCE_DARK covers
+        // older WebView builds and is harmless on newer ones.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(web.settings, true)
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            // FORCE_DARK_AUTO matches the activity's day/night state
+            // without overriding the page's own CSS where it cares.
+            WebSettingsCompat.setForceDark(web.settings, WebSettingsCompat.FORCE_DARK_AUTO)
+        }
+
+        // Paint the WebView's initial background to the surface colour
+        // so a slow asset load doesn't flash a white square on the
+        // dark-themed activity.
+        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        web.setBackgroundColor(
+            if (nightMode == Configuration.UI_MODE_NIGHT_YES) Color.parseColor("#1A1817")
+            else Color.parseColor("#FAF6EE"),
+        )
+
         web.loadUrl("file:///android_asset/open_source_licenses.html")
     }
 }

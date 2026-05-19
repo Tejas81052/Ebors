@@ -58,9 +58,12 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         get() = prefs.getBoolean(KEY_DESKTOP_MODE, false)
         set(value) = prefs.edit { putBoolean(KEY_DESKTOP_MODE, value) }
 
-    /** Apply force-dark / algorithmic darkening to web content. */
+    /** Apply force-dark / algorithmic darkening to web content. Default
+     *  on so a fresh install lands in dark mode straight away — the app
+     *  shell is dark-themed via DayNight, and force-dark covers the web
+     *  pages so colour transitions don't whiplash on every nav. */
     var forceDark: Boolean
-        get() = prefs.getBoolean(KEY_FORCE_DARK, false)
+        get() = prefs.getBoolean(KEY_FORCE_DARK, true)
         set(value) = prefs.edit { putBoolean(KEY_FORCE_DARK, value) }
 
     /** Master switch for the network-level ad/tracker blocker. */
@@ -91,9 +94,10 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         set(value) = prefs.edit { putBoolean(KEY_HISTORY_ENABLED, value) }
 
     /** Block popup windows opened via window.open(). OAuth still works because
-     *  it's an explicit user gesture handled separately. */
+     *  it's an explicit user gesture handled separately. Default on so a
+     *  fresh install isn't ambushed by drive-by popunders. */
     var blockPopups: Boolean
-        get() = prefs.getBoolean(KEY_BLOCK_POPUPS, false)
+        get() = prefs.getBoolean(KEY_BLOCK_POPUPS, true)
         set(value) = prefs.edit { putBoolean(KEY_BLOCK_POPUPS, value) }
 
     /**
@@ -115,7 +119,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
      * `NEVER_ALLOW`.
      */
     var allowMixedContent: Boolean
-        get() = prefs.getBoolean(KEY_ALLOW_MIXED_CONTENT, false)
+        get() = prefs.getBoolean(KEY_ALLOW_MIXED_CONTENT, true)
         set(value) = prefs.edit { putBoolean(KEY_ALLOW_MIXED_CONTENT, value) }
 
     /**
@@ -128,7 +132,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
      * controls the invasive script-level evasion.
      */
     var aggressiveAntiAdblock: Boolean
-        get() = prefs.getBoolean(KEY_AGGRESSIVE_ANTI_ADBLOCK, false)
+        get() = prefs.getBoolean(KEY_AGGRESSIVE_ANTI_ADBLOCK, true)
         set(value) = prefs.edit { putBoolean(KEY_AGGRESSIVE_ANTI_ADBLOCK, value) }
 
     /**
@@ -228,6 +232,46 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
     var termsAcceptedAt: Long
         get() = prefs.getLong(KEY_TERMS_ACCEPTED_AT, 0L)
         set(value) = prefs.edit { putLong(KEY_TERMS_ACCEPTED_AT, value) }
+
+    /**
+     * Stamp every "default on" toggle to disk *if it has never been
+     * written before*. Idempotent and non-destructive: a key the user
+     * has explicitly toggled (either direction) will already exist in
+     * the backing prefs file, so [SharedPreferences.contains] returns
+     * true and we leave it alone. Keys that the user has never seen
+     * yet (fresh install, or new keys introduced by an app update)
+     * land at our preferred default.
+     *
+     * This is called from two places:
+     *  - [WelcomeActivity], when the user accepts the terms on a
+     *    fresh install. Catches the cold-start case.
+     *  - [MainActivity.onCreate], on every launch after the onboarding
+     *    gate. Catches existing installs that upgrade to a version
+     *    where one of these toggles became "default on" — without this
+     *    pass, the user would see those toggles read as `true` from
+     *    the new in-code default, then silently flip back to `false`
+     *    the moment any code path wrote the prefs file (because the
+     *    key is absent until written).
+     *
+     * Pre-1.0 there is no migration cost worth tracking; we just want
+     * the user's first interactive session to start with the toggles
+     * the welcome flow promised.
+     */
+    fun bootstrapDefaults() {
+        prefs.edit {
+            if (!prefs.contains(KEY_FORCE_DARK)) putBoolean(KEY_FORCE_DARK, true)
+            if (!prefs.contains(KEY_AD_BLOCK)) putBoolean(KEY_AD_BLOCK, true)
+            if (!prefs.contains(KEY_SITE_BLOCK)) putBoolean(KEY_SITE_BLOCK, true)
+            if (!prefs.contains(KEY_BLOCKLIST_AUTO_UPDATE)) putBoolean(KEY_BLOCKLIST_AUTO_UPDATE, true)
+            if (!prefs.contains(KEY_ALLOW_MIXED_CONTENT)) putBoolean(KEY_ALLOW_MIXED_CONTENT, true)
+            if (!prefs.contains(KEY_AGGRESSIVE_ANTI_ADBLOCK)) putBoolean(KEY_AGGRESSIVE_ANTI_ADBLOCK, true)
+            if (!prefs.contains(KEY_BLOCK_WEBRTC)) putBoolean(KEY_BLOCK_WEBRTC, true)
+            if (!prefs.contains(KEY_TRIM_REFERRER)) putBoolean(KEY_TRIM_REFERRER, true)
+            if (!prefs.contains(KEY_HISTORY_ENABLED)) putBoolean(KEY_HISTORY_ENABLED, true)
+            if (!prefs.contains(KEY_JS_ENABLED)) putBoolean(KEY_JS_ENABLED, true)
+            if (!prefs.contains(KEY_BLOCK_POPUPS)) putBoolean(KEY_BLOCK_POPUPS, true)
+        }
+    }
 
     /**
      * v10 user-selectable accent colour. Stored as one of the keys

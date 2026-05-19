@@ -239,43 +239,8 @@
                 style="@style/SettingsHeader"
                 android:text="@string/settings_section_about" />
 
-            <com.google.android.material.card.MaterialCardView style="@style/SettingsRowCard">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="16dp"
-                    android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="14dp">
-
-                    <TextView
-                        style="@style/SettingsRowTitle"
-                        android:text="@string/about_app_title" />
-
-                    <TextView
-                        android:id="@+id/about_version"
-                        style="@style/SettingsRowSummary"
-                        tools:text="Version 1.0" />
-
-                    <TextView
-                        style="@style/SettingsRowSummary"
-                        android:text="@string/about_copyright" />
-
-                    <TextView
-                        style="@style/SettingsRowSummary"
-                        android:text="@string/about_engine" />
-
-                    <TextView
-                        style="@style/SettingsRowSummary"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/about_known_limitation" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
             <com.google.android.material.card.MaterialCardView
-                android:id="@+id/row_privacy_policy"
+                android:id="@+id/row_about"
                 style="@style/SettingsRowCard"
                 android:clickable="true"
                 android:focusable="true"
@@ -284,71 +249,36 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
                     android:paddingStart="16dp"
                     android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
+                    android:paddingEnd="12dp"
                     android:paddingBottom="14dp">
 
-                    <TextView
-                        style="@style/SettingsRowTitle"
-                        android:text="@string/setting_privacy_policy_title" />
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
 
-                    <TextView
-                        style="@style/SettingsRowSummary"
-                        android:text="@string/setting_privacy_policy_summary" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+                        <TextView
+                            style="@style/SettingsRowTitle"
+                            android:text="@string/about_app_title" />
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/row_terms"
-                style="@style/SettingsRowCard"
-                android:clickable="true"
-                android:focusable="true"
-                android:foreground="?attr/selectableItemBackground">
+                        <TextView
+                            android:id="@+id/about_version"
+                            style="@style/SettingsRowSummary"
+                            tools:text="Version 1.0" />
+                    </LinearLayout>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="16dp"
-                    android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="14dp">
-
-                    <TextView
-                        style="@style/SettingsRowTitle"
-                        android:text="@string/setting_terms_title" />
-
-                    <TextView
-                        style="@style/SettingsRowSummary"
-                        android:text="@string/setting_terms_summary" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/row_open_source_licenses"
-                style="@style/SettingsRowCard"
-                android:clickable="true"
-                android:focusable="true"
-                android:foreground="?attr/selectableItemBackground">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="16dp"
-                    android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="14dp">
-
-                    <TextView
-                        style="@style/SettingsRowTitle"
-                        android:text="@string/setting_open_source_licenses_title" />
-
-                    <TextView
-                        style="@style/SettingsRowSummary"
-                        android:text="@string/setting_open_source_licenses_summary" />
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_marginStart="8dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_chevron_right_24"
+                        app:tint="@color/browser_hint" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
