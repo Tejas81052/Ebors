@@ -1840,7 +1840,7 @@ class MainActivity : AppCompatActivity() {
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>?,
-                fileChooserParams: FileChooserParams?,
+                fileChooserParams: WebChromeClient.FileChooserParams?,
             ): Boolean {
                 if (filePathCallback == null) return false
                 // Background-tab pages shouldn't pop a system picker.
@@ -1855,12 +1855,23 @@ class MainActivity : AppCompatActivity() {
                 pendingFileChooserCallback?.onReceiveValue(null)
                 pendingFileChooserCallback = filePathCallback
 
-                val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
+                // Build the chooser intent. Earlier versions of this
+                // method used an elvis + .apply chain to fall back to
+                // ACTION_GET_CONTENT, but Kotlin's parser tripped on
+                // the elvis-trailing-lambda combo and bailed out of
+                // the surrounding function body. Plain if/else keeps
+                // the structure unambiguous.
+                val pageIntent = fileChooserParams?.createIntent()
+                val intent: Intent = if (pageIntent != null) {
+                    pageIntent
+                } else {
+                    val fallback = Intent(Intent.ACTION_GET_CONTENT)
+                    fallback.addCategory(Intent.CATEGORY_OPENABLE)
+                    fallback.type = "*/*"
+                    fallback
                 }
                 // Multi-select honours the page's `multiple` attribute.
-                if (fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                if (fileChooserParams?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
                     intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 }
                 return try {

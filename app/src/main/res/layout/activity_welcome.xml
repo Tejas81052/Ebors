@@ -22,9 +22,8 @@
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:gravity="center_vertical"
-                android:minHeight="match_parent"
                 android:orientation="vertical"
                 android:paddingStart="28dp"
                 android:paddingTop="40dp"
@@ -224,9 +223,8 @@
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:gravity="center_vertical"
-                android:minHeight="match_parent"
                 android:orientation="vertical"
                 android:paddingStart="28dp"
                 android:paddingTop="40dp"
