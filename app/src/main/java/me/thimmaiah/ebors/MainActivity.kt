@@ -1820,23 +1820,30 @@ class MainActivity : AppCompatActivity() {
                 exitFullscreen()
             }
 
-            /**
-             * Handle <input type="file"> picker requests. Without this
-             * override every file-picker tap on every page silently
-             * no-ops — uploads in Gmail web, profile-picture pickers,
-             * "attach file" buttons all fail.
-             *
-             * We launch a system chooser combining ACTION_GET_CONTENT
-             * (apps that publish a content provider — gallery, files
-             * app, drive) with the MIME types the page asked for via
-             * the input's `accept=` attribute. Multi-select is
-             * honoured when the page set `multiple`. Camera capture
-             * for `accept="image/*" capture` falls through to whatever
-             * camera app the chooser surfaces; we deliberately don't
-             * roll our own FileProvider+ACTION_IMAGE_CAPTURE chain
-             * for v1.0 — Android's chooser already includes the
-             * camera as a source on devices that have one.
-             */
+            //
+            // Handle `<input type="file">` picker requests. Without this
+            // override every file-picker tap on every page silently
+            // no-ops — uploads in Gmail web, profile-picture pickers,
+            // "attach file" buttons all fail.
+            //
+            // We launch a system chooser combining ACTION_GET_CONTENT
+            // (apps that publish a content provider — gallery, files
+            // app, drive) with the MIME types the page asked for via
+            // the input's `accept=` attribute. Multi-select is
+            // honoured when the page set `multiple`. Camera capture
+            // (image accept hint with the "capture" attribute) falls
+            // through to whatever camera app the chooser surfaces; we
+            // deliberately don't roll our own FileProvider plus
+            // ACTION_IMAGE_CAPTURE chain for v1.0 — Android's chooser
+            // already includes the camera as a source on devices that
+            // have one.
+            //
+            // (Block-comment KDoc style avoided here intentionally: an
+            //  earlier version used /** ... */ and embedded the literal
+            //  string `image/<star>` inside backticks. Kotlin's lexer
+            //  doesn't honour markdown backticks; it saw the `*/` and
+            //  closed the doc block early, breaking the rest of the
+            //  class. Plain // comments dodge that hazard entirely.)
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>?,
