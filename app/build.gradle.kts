@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "me.thimmaiah.effectivebrowser"
+    namespace = "me.thimmaiah.ebors"
     // The structured `release(N) { minorApiLevel = X }` form is the
     // AGP 9.0+ way of declaring a compileSdk minor (e.g. 36.1). The
     // shorter `compileSdk = 36` shorthand works for major-only targets
@@ -16,7 +16,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "me.thimmaiah.effectivebrowser"
+        applicationId = "me.thimmaiah.ebors"
         minSdk = 29
         targetSdk = 36
         versionCode = 1

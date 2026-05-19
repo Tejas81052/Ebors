@@ -7,7 +7,7 @@
     "a downloaded list whose version is strictly greater than the current",
     "effective one. Bump 'version' every time the data below changes.",
     "",
-    "Curated ad / tracker / fingerprint block list for Effective Browser.",
+    "Curated ad / tracker / fingerprint block list for Ebors.",
     "Compiled from the highest-traffic entries in EasyList, EasyPrivacy and",
     "AdGuard Base — roughly the top fraction of rules that catch the bulk of",
     "real-world ad/tracker requests, hand-tuned to avoid the false positives",

@@ -1,6 +1,6 @@
-# Effective Browser v10 — design handoff
+# Ebors v10 — design handoff
 
-This folder bridges the **paper-theme prototype** (`Effective Browser.html`) back to the Kotlin app. Drop files in, rebuild, no code refactor needed beyond two small `MainActivity.kt` additions.
+This folder bridges the **paper-theme prototype** (`Ebors.html`) back to the Kotlin app. Drop files in, rebuild, no code refactor needed beyond two small `MainActivity.kt` additions.
 
 ---
 

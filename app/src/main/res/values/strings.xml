@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Effective Browser</string>
+    <string name="app_name">Ebors</string>
     <string name="address_hint">Search or enter address</string>
     <string name="address_hint_with_engine">Search %1$s or enter address</string>
     <string name="go_button">Load page</string>
@@ -18,11 +18,11 @@
     <string name="unsupported_link_message">Only web links are supported.</string>
     <string name="ssl_blocked_message">Secure connection failed. The page was blocked.</string>
     <string name="search_engine_dialog_title">Choose a search engine</string>
-    <string name="default_browser_prompt">Set Effective Browser as your default browser.</string>
+    <string name="default_browser_prompt">Set Ebors as your default browser.</string>
     <string name="set_default_browser_action">Set default</string>
-    <string name="default_browser_success">Effective Browser is now your default browser.</string>
+    <string name="default_browser_success">Ebors is now your default browser.</string>
     <string name="default_browser_not_changed">Default browser was not changed.</string>
-    <string name="default_browser_already_set">Effective Browser is already your default browser.</string>
+    <string name="default_browser_already_set">Ebors is already your default browser.</string>
     <string name="share_page">Share page</string>
     <string name="save_page">Save</string>
     <string name="saved_page">Saved</string>
@@ -92,7 +92,7 @@
     <string name="download_file_missing">The downloaded file could not be found.</string>
     <string name="no_app_to_open_download">No app is available to open this file.</string>
     <string name="install_apk_title">Install this app?</string>
-    <string name="install_apk_permission_message">Android needs your permission to install apps from Effective Browser. After enabling it, return here and tap the download again.</string>
+    <string name="install_apk_permission_message">Android needs your permission to install apps from Ebors. After enabling it, return here and tap the download again.</string>
     <string name="install_apk_open_settings">Open settings</string>
     <string name="download_notification_channel">Downloads</string>
     <string name="download_notification_title_single">Downloading file</string>
@@ -209,8 +209,13 @@
     <!-- Reused: existing strings cover the find-in-page debounce UX. -->
 
     <string name="setting_clear_browsing_data_summary">Cookies, cache, history and form data.</string>
-    <string name="about_app_title">Effective Browser</string>
+    <string name="about_app_title">Ebors</string>
     <string name="about_version_label">Version %1$s</string>
+    <string name="about_copyright">© 2025 Tejas Thimmaiah. Licensed under the Apache License, Version 2.0.</string>
+    <string name="about_engine">Rendering engine: Android System WebView (Chromium-based).</string>
+    <string name="setting_open_source_licenses_title">Open-source licenses</string>
+    <string name="setting_open_source_licenses_summary">Third-party libraries used by Ebors.</string>
+    <string name="open_source_licenses_title">Open-source licenses</string>
 
     <string name="library_title">Library</string>
     <string name="bookmarks_history">Bookmarks &amp; history</string>

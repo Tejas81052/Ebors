@@ -1,4 +1,4 @@
-# R8 / ProGuard rules for Effective Browser.
+# R8 / ProGuard rules for Ebors.
 # `proguard-android-optimize.txt` (the inherited default) covers the
 # Android framework, AndroidX, and Kotlin reflection plumbing — this
 # file only carries app-specific keep rules.
@@ -21,17 +21,17 @@
 # involved today, so R8 wouldn't strip them. The keeps below are
 # future-proofing in case the JSON layer is ever swapped for one that
 # does use reflection (Moshi, kotlinx.serialization, etc.).
--keep class me.thimmaiah.effectivebrowser.DownloadItem { *; }
--keep class me.thimmaiah.effectivebrowser.Bookmark { *; }
--keep class me.thimmaiah.effectivebrowser.HistoryEntry { *; }
--keep enum me.thimmaiah.effectivebrowser.DownloadStatus { *; }
+-keep class me.thimmaiah.ebors.DownloadItem { *; }
+-keep class me.thimmaiah.ebors.Bookmark { *; }
+-keep class me.thimmaiah.ebors.HistoryEntry { *; }
+-keep enum me.thimmaiah.ebors.DownloadStatus { *; }
 
 # ---------------------------------------------------------------------
 # WebView JavaScript interfaces
 # ---------------------------------------------------------------------
 # We don't expose any @JavascriptInterface today. If that changes,
 # uncomment the rule below and replace the FQCN.
-# -keepclassmembers class me.thimmaiah.effectivebrowser.MyJsInterface {
+# -keepclassmembers class me.thimmaiah.ebors.MyJsInterface {
 #     @android.webkit.JavascriptInterface <methods>;
 # }
 

@@ -197,6 +197,6 @@
             android:paddingBottom="2dp"
             android:textColor="@color/browser_text"
             android:textSize="11sp"
-            tools:text="effectivebrowser.app" />
+            tools:text="ebors.app" />
     </LinearLayout>
 </FrameLayout>

@@ -15,7 +15,7 @@
         android:navigationIcon="@drawable/ic_arrow_back_24"
         app:menu="@menu/blocked_sites_menu"
         app:title="@string/blocked_sites_title"
-        app:titleTextAppearance="@style/TextAppearance.EffectiveBrowser.Title"
+        app:titleTextAppearance="@style/TextAppearance.Ebors.Title"
         app:titleTextColor="@color/browser_text" />
 
     <androidx.recyclerview.widget.RecyclerView
