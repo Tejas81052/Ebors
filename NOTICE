@@ -1,0 +1,42 @@
+Ebors
+Copyright 2025 Tejas Thimmaiah
+
+This product is licensed under the Apache License, Version 2.0 (see the
+accompanying LICENSE file).
+
+Ebors uses Android's system WebView (Chromium-based) as its rendering
+engine. The system WebView is provided by the device's operating system
+and is not bundled with this application.
+
+------------------------------------------------------------------------
+Third-party libraries shipped inside the Ebors APK
+------------------------------------------------------------------------
+
+This product includes software developed by:
+
+  - The Android Open Source Project / Google LLC
+    AndroidX (core-ktx, appcompat, activity, constraintlayout, recyclerview,
+    swiperefreshlayout, webkit) and Material Components for Android.
+    Apache License, Version 2.0.
+    https://developer.android.com/jetpack/androidx
+    https://github.com/material-components/material-components-android
+
+  - JetBrains s.r.o. and Kotlin Programming Language contributors
+    Kotlin standard library.
+    Apache License, Version 2.0.
+    https://github.com/JetBrains/kotlin
+
+  - Square, Inc.
+    OkHttp.
+    Apache License, Version 2.0.
+    https://github.com/square/okhttp
+
+The full text of the Apache License, Version 2.0 is included in LICENSE
+and is also available at http://www.apache.org/licenses/LICENSE-2.0.
+
+The Android name, the Android logo, the "Droid" name, and other Android
+trademarks are property of Google LLC. Ebors is not affiliated with or
+endorsed by Google LLC. "Chromium" is a name used by The Chromium Authors
+to refer to their open-source browser project; the Chromium-based engine
+in Android's system WebView is shipped by Google / the device OEM and is
+not redistributed by Ebors.

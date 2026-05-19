@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Effective Browser v10 — "paper" palette.
+  Ebors v10 — "paper" palette.
   Migration from v9: hex values change but every color name is preserved
   so MainActivity.kt / layouts continue to compile without edits.
 

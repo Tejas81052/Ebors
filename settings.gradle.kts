@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "EffectiveBrowser"
+rootProject.name = "Ebors"
 include(":app")

@@ -15,7 +15,7 @@
         android:navigationIcon="@drawable/ic_arrow_back_24"
         app:menu="@menu/downloads_menu"
         app:title="@string/downloads_title"
-        app:titleTextAppearance="@style/TextAppearance.EffectiveBrowser.Title"
+        app:titleTextAppearance="@style/TextAppearance.Ebors.Title"
         app:titleTextColor="@color/browser_text" />
 
     <LinearLayout

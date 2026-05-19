@@ -1,7 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Base.Theme.EffectiveBrowser" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Base.Theme.Ebors" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Default accent attrs point at terracotta. Each
-             Theme.EffectiveBrowser.Accent* child overrides these
+             Theme.Ebors.Accent* child overrides these
              to swap the whole chrome's accent colour without
              touching layouts. -->
         <item name="browserAccent">@color/accent_terracotta</item>
@@ -18,7 +18,7 @@
         <item name="android:textColor">@color/browser_text</item>
     </style>
 
-    <style name="Theme.EffectiveBrowser" parent="Base.Theme.EffectiveBrowser" />
+    <style name="Theme.Ebors" parent="Base.Theme.Ebors" />
 
     <!--
       v10 user-selectable accent themes. Activities apply the right
@@ -26,35 +26,35 @@
       switches accents from Settings → Appearance → Accent.
 
       Only the two accent attrs need overriding; everything else
-      inherits from Base.Theme.EffectiveBrowser so day/night, surface
+      inherits from Base.Theme.Ebors so day/night, surface
       colours, etc. remain consistent.
     -->
-    <style name="Theme.EffectiveBrowser.AccentTerracotta" parent="Base.Theme.EffectiveBrowser">
+    <style name="Theme.Ebors.AccentTerracotta" parent="Base.Theme.Ebors">
         <item name="browserAccent">@color/accent_terracotta</item>
         <item name="browserAccentSoft">@color/accent_terracotta_soft</item>
     </style>
 
-    <style name="Theme.EffectiveBrowser.AccentTeal" parent="Base.Theme.EffectiveBrowser">
+    <style name="Theme.Ebors.AccentTeal" parent="Base.Theme.Ebors">
         <item name="browserAccent">@color/accent_teal</item>
         <item name="browserAccentSoft">@color/accent_teal_soft</item>
     </style>
 
-    <style name="Theme.EffectiveBrowser.AccentRoyalBlue" parent="Base.Theme.EffectiveBrowser">
+    <style name="Theme.Ebors.AccentRoyalBlue" parent="Base.Theme.Ebors">
         <item name="browserAccent">@color/accent_royal_blue</item>
         <item name="browserAccentSoft">@color/accent_royal_blue_soft</item>
     </style>
 
-    <style name="Theme.EffectiveBrowser.AccentDeepPurple" parent="Base.Theme.EffectiveBrowser">
+    <style name="Theme.Ebors.AccentDeepPurple" parent="Base.Theme.Ebors">
         <item name="browserAccent">@color/accent_deep_purple</item>
         <item name="browserAccentSoft">@color/accent_deep_purple_soft</item>
     </style>
 
-    <style name="Theme.EffectiveBrowser.AccentCharcoal" parent="Base.Theme.EffectiveBrowser">
+    <style name="Theme.Ebors.AccentCharcoal" parent="Base.Theme.Ebors">
         <item name="browserAccent">@color/accent_charcoal</item>
         <item name="browserAccentSoft">@color/accent_charcoal_soft</item>
     </style>
 
-    <style name="TextAppearance.EffectiveBrowser.Title" parent="TextAppearance.Material3.TitleLarge">
+    <style name="TextAppearance.Ebors.Title" parent="TextAppearance.Material3.TitleLarge">
         <item name="android:textColor">@color/browser_text</item>
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">-0.01</item>
