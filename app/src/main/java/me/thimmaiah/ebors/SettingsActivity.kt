@@ -451,6 +451,26 @@ class SettingsActivity : AppCompatActivity() {
         row.findViewById<TextView>(R.id.switch_title).setText(titleRes)
         row.findViewById<TextView>(R.id.switch_summary).setText(summaryRes)
         val switch = row.findViewById<MaterialSwitch>(R.id.switch_value)
+
+        // Belt-and-braces defence against the "accent change flips every
+        // toggle" bug:
+        //
+        //  1. isSaveEnabled = false — matches saveEnabled="false" set in
+        //     item_settings_switch.xml. Skips this switch in the
+        //     activity's view-state save/restore pass, which would
+        //     otherwise collide across the ~14 included rows that all
+        //     share the same @id/switch_value identifier.
+        //  2. Detach any prior listener BEFORE writing isChecked. If
+        //     state restore (or anything else) sets isChecked while a
+        //     listener is attached, the listener fires and overwrites
+        //     the durable pref with whatever transient value came in.
+        //     bindSwitchRow runs on every onCreate after recreate(); on
+        //     the second pass the switch already exists from layout
+        //     inflation, but we re-bind defensively.
+        //  3. Read the durable value (prefs) into isChecked.
+        //  4. Re-attach the listener so subsequent user taps write back.
+        switch.isSaveEnabled = false
+        switch.setOnCheckedChangeListener(null)
         switch.isChecked = get()
         switch.setOnCheckedChangeListener { _, value -> set(value) }
         // Forward taps anywhere on the row to the switch — this gives the

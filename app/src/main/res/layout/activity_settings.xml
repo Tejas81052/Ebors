@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@android:color/transparent"
-        android:navigationIcon="@drawable/ic_arrow_back_24"
+        app:navigationIcon="@drawable/ic_arrow_back_24"
         app:title="@string/settings_title"
         app:titleTextAppearance="@style/TextAppearance.Ebors.Title"
         app:titleTextColor="@color/browser_text" />
