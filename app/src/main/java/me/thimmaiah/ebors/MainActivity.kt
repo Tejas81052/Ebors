@@ -2591,34 +2591,36 @@ class MainActivity : AppCompatActivity() {
      * URLs. Other tabs / other sites / other pages on YouTube stay on
      * the existing Brave-style overlay layout (margin = 0).
      */
-    private fun applyShortsLayout(active: Boolean) {
-        if (shortsLayoutActive == active) return
-        shortsLayoutActive = active
+    private fun applyShortsLayout(@Suppress("UNUSED_PARAMETER") active: Boolean) {
+        // No-op as of the inactivity-hide redesign.
+        //
+        // The previous implementation pushed web_container up by the
+        // bottom-chrome height whenever the active tab was on a Shorts
+        // URL. The intent was to keep Shorts' bottom controls visible
+        // above the chrome. The unintended consequence: that margin is
+        // static — when the chrome slid out via HideViewOnScrollBehavior
+        // (or now via the inactivity timer in scheduleAutoHide), the
+        // margin stayed, leaving a black band equal to the chrome's
+        // height at the bottom of the WebView (the bug the user filed
+        // with the "MOSFIATA" Shorts screenshot).
+        //
+        // The fix is to drop the margin entirely. The chrome already
+        // floats over the WebView on every other page; doing the same
+        // on Shorts is consistent, and the new 4 s inactivity hide
+        // clears the chrome out of the way fast enough that Shorts'
+        // bottom controls become visible without our help. Matches how
+        // Chrome and Brave handle the same screen.
+        //
+        // Existing margin from a previous Shorts navigation (the field
+        // started life as a long-lived layout mutation) is reset to 0
+        // here defensively so a hot-swap upgrade can't leave the user
+        // with a stranded letterbox.
+        shortsLayoutActive = false
         val params = webContainer.layoutParams as? CoordinatorLayout.LayoutParams ?: return
-        // bottomChrome.height is 0 until the view tree's first layout
-        // pass. This can fire from onPageStarted on a cold-start Shorts
-        // URL — applying a 0-margin then short-circuits future calls
-        // (the early-return at the top), leaving Shorts behind the
-        // chrome forever. If we haven't been laid out yet, defer the
-        // margin application to the next layout pass.
-        val chromeHeight = bottomChrome.height
-        if (active && chromeHeight == 0) {
-            bottomChrome.post {
-                if (!shortsLayoutActive) return@post
-                val deferred = webContainer.layoutParams as? CoordinatorLayout.LayoutParams
-                    ?: return@post
-                val resolved = bottomChrome.height
-                if (deferred.bottomMargin != resolved) {
-                    deferred.bottomMargin = resolved
-                    webContainer.layoutParams = deferred
-                }
-            }
-            return
+        if (params.bottomMargin != 0) {
+            params.bottomMargin = 0
+            webContainer.layoutParams = params
         }
-        val newMargin = if (active) chromeHeight else 0
-        if (params.bottomMargin == newMargin) return
-        params.bottomMargin = newMargin
-        webContainer.layoutParams = params
     }
 
     private fun injectPageScripts(view: WebView?, url: String?) {
