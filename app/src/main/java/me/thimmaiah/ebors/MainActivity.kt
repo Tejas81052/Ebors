@@ -596,6 +596,7 @@ class MainActivity : AppCompatActivity() {
 
         bindViews()
         applyInsets()
+        configureBottomChromeInset()
         configureNavigation()
         configureFindBar()
         configureSwipeRefresh()
@@ -609,11 +610,6 @@ class MainActivity : AppCompatActivity() {
             openNewTab(url = intentUrl ?: homeUrl(), switchTo = true)
         }
         applyPreferences()
-
-        // Chrome starts visible, so inset the WebView above the bottom
-        // nav from the first paint. Deferred internally until the
-        // bottom chrome has measured a non-zero height.
-        applyWebContainerBottomInset(chromeVisible = true)
 
         maybeShowDefaultBrowserPrompt()
         maybeRequestNotificationPermission()
@@ -2135,11 +2131,24 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                // Two stages need handling:
+                //
+                // Stage 1 — awaiting the Android system dialog:
+                //   pendingWebsitePermission is set and its request matches.
+                //
+                // Stage 2 — our in-app dialog is showing but the system
+                //   dialog hasn't been launched yet (pendingWebsitePermission
+                //   is still null, but permissionInFlightTabId is already
+                //   set to this tab's id from handleWebsitePermissionRequest).
+                //   If the page navigates away here, permissionInFlightTabId
+                //   is never cleared and every subsequent camera/mic request
+                //   on this tab is silently denied forever.
                 if (tab.pendingWebsitePermission?.request == request) {
                     tab.pendingWebsitePermission = null
-                    if (permissionInFlightTabId == tab.id) {
-                        permissionInFlightTabId = null
-                    }
+                    if (permissionInFlightTabId == tab.id) permissionInFlightTabId = null
+                } else if (permissionInFlightTabId == tab.id && tab.pendingWebsitePermission == null) {
+                    // Stage 2: cancel arrived while our dialog is open.
+                    permissionInFlightTabId = null
                 }
             }
 
@@ -2810,6 +2819,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Register a persistent layout-change listener on [bottomChrome] so
+     * [webHost]'s bottom padding stays in sync with the chrome's height
+     * across its entire lifetime — including the very first layout pass,
+     * which fires asynchronously after [onCreate] returns.
+     *
+     * The old [applyWebContainerBottomInset] approach used [View.post]
+     * for the deferred case, which queues on the main message handler.
+     * On some frames that runnable executed *before* the layout traversal
+     * completed, so [bottomChrome].height was still 0 at the time it ran
+     * and the padding was never set, leaving the WebView's bottom edge
+     * hidden behind [bottomChrome] for the entire session.
+     *
+     * Called once from [onCreate]; the listener lives as long as the view.
+     */
+    private fun configureBottomChromeInset() {
+        bottomChrome.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val newHeight = bottom - top
+            applyWebContainerBottomInset(chromeVisible = !chromeHidden, knownHeight = newHeight)
+        }
+    }
+
+    /**
      * Shrink the actual WebView so its bottom edge sits *above* the
      * bottom navigation while the chrome is visible, and let it fill
      * the whole area when the chrome hides. This is what makes a page's
@@ -2827,33 +2858,23 @@ class MainActivity : AppCompatActivity() {
      * MATCH_PARENT child (the WebView) to `height − padding`, so the
      * WebView truly resizes and the page sees a smaller viewport.
      *
-     * bottomChrome.height is 0 until the first layout pass; if asked to
-     * inset before then, defer to the next layout and re-read.
+     * [knownHeight] can be supplied by [configureBottomChromeInset]'s
+     * layout-change callback to skip a redundant [bottomChrome].height
+     * read; callers that don't have it pass -1 and we read it here.
      */
-    private fun applyWebContainerBottomInset(chromeVisible: Boolean) {
-        fun setBottomPadding(px: Int) {
-            if (webHost.paddingBottom != px) {
-                webHost.setPadding(
-                    webHost.paddingLeft,
-                    webHost.paddingTop,
-                    webHost.paddingRight,
-                    px,
-                )
-            }
+    private fun applyWebContainerBottomInset(
+        chromeVisible: Boolean,
+        knownHeight: Int = -1,
+    ) {
+        val px = if (chromeVisible) {
+            val h = if (knownHeight >= 0) knownHeight else bottomChrome.height
+            h.coerceAtLeast(0)
+        } else {
+            0
         }
-        if (!chromeVisible) {
-            setBottomPadding(0)
-            return
+        if (webHost.paddingBottom != px) {
+            webHost.setPadding(webHost.paddingLeft, webHost.paddingTop, webHost.paddingRight, px)
         }
-        val height = bottomChrome.height
-        if (height == 0) {
-            bottomChrome.post {
-                // Chrome may have hidden again between post and run.
-                if (!chromeHidden) setBottomPadding(bottomChrome.height)
-            }
-            return
-        }
-        setBottomPadding(height)
     }
 
     // ---------------------------------------------------------------------
