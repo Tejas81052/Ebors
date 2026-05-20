@@ -240,8 +240,8 @@ class MainActivity : AppCompatActivity() {
     //  - Reset on every touch and every scroll event.
     //  - When chrome is visible and the timer expires (4 s of no
     //    user interaction), hide both bars.
-    //  - When the user touches the screen again, [dispatchTouchEvent]
-    //    re-reveals the chrome and re-arms the timer.
+    //  - Chrome re-reveals when the user scrolls back up, reaches the
+    //    top of the page, loads a new page, or switches tabs.
     //  - Address-bar focus, find-bar visibility, tab-switcher overlay,
     //    and fullscreen mode all cancel the timer so chrome can't
     //    auto-hide out from under the user mid-task.
@@ -324,6 +324,16 @@ class MainActivity : AppCompatActivity() {
      */
     private var permissionInFlightTabId: String? = null
     private var geolocationInFlightTabId: String? = null
+
+    /**
+     * Reference to the in-app permission dialog currently on screen, if any.
+     * Kept so [onPermissionRequestCanceled] can dismiss it when the page
+     * navigates while the dialog is open — without this, the user would see
+     * a stale dialog whose "Allow" tap calls [PermissionRequest.grant] on an
+     * already-cancelled request, which WebView silently ignores, leaving the
+     * camera/mic perpetually broken for that visit.
+     */
+    private var inFlightPermissionDialog: android.app.AlertDialog? = null
 
     // HTML5 fullscreen state (e.g. YouTube tap-to-fullscreen). Populated when
     // a page calls Element.requestFullscreen() and WebChromeClient hands us a
@@ -731,6 +741,7 @@ class MainActivity : AppCompatActivity() {
         exitFullscreen()
         permissionInFlightTabId = null
         geolocationInFlightTabId = null
+        inFlightPermissionDialog = null  // activity torn down; dialog auto-dismissed
         // Drop any pending find-in-page debounce so the runnable doesn't
         // fire after the WebView is destroyed and reach through
         // activeTabOrNull to call findAllAsync on a torn-down view.
@@ -2151,8 +2162,14 @@ class MainActivity : AppCompatActivity() {
                     tab.pendingWebsitePermission = null
                     if (permissionInFlightTabId == tab.id) permissionInFlightTabId = null
                 } else if (permissionInFlightTabId == tab.id && tab.pendingWebsitePermission == null) {
-                    // Stage 2: cancel arrived while our dialog is open.
+                    // Stage 2: cancel arrived while our in-app dialog is open.
+                    // Dismiss it so the user can't tap "Allow" on a dead
+                    // request — grant() on a cancelled PermissionRequest is
+                    // silently ignored by WebView, which would leave camera/mic
+                    // permanently broken for this visit with no visible error.
                     permissionInFlightTabId = null
+                    inFlightPermissionDialog?.dismiss()
+                    inFlightPermissionDialog = null
                 }
             }
 
@@ -2799,28 +2816,26 @@ class MainActivity : AppCompatActivity() {
         scrollDirAccumPx = 0
         chromeAnimGateUntilMs = android.os.SystemClock.uptimeMillis() + CHROME_ANIM_GATE_MS
         topChrome.setExpanded(!hidden, /* animate = */ true)
-        // bottom_chrome lives inside a LinearLayout (content_wrapper), so
-        // CoordinatorLayout behaviors (HideViewOnScrollBehavior) don't
-        // apply to it — the cast to CoordinatorLayout.LayoutParams would
-        // always return null. Instead we animate with translationY and
-        // toggle GONE/VISIBLE so the LinearLayout releases the space and
-        // main_content_area (the WebView host) truly resizes — satisfying
-        // the requirement that the viewport grows when the chrome hides.
+        // bottom_chrome lives inside a LinearLayout (content_wrapper). A
+        // translationY-based slide is clipped to the parent's bounds and
+        // therefore invisible — use alpha instead so the fade is visible
+        // regardless of clip settings. GONE/VISIBLE releases/re-claims the
+        // layout space so main_content_area (the WebView host) truly resizes.
         if (hidden) {
-            val slideDistance = bottomChrome.height.toFloat()
             bottomChrome.animate()
-                .translationY(slideDistance)
-                .setDuration(250)
-                .withEndAction { bottomChrome.visibility = View.GONE }
+                .alpha(0f)
+                .setDuration(200)
+                .withEndAction {
+                    bottomChrome.visibility = View.GONE
+                    bottomChrome.alpha = 1f  // reset for next reveal
+                }
                 .start()
         } else {
-            // Pre-position off-screen then slide back in so the bar
-            // doesn't jump into view from y=0.
-            bottomChrome.translationY = bottomChrome.height.toFloat()
+            bottomChrome.alpha = 0f
             bottomChrome.visibility = View.VISIBLE
             bottomChrome.animate()
-                .translationY(0f)
-                .setDuration(250)
+                .alpha(1f)
+                .setDuration(200)
                 .start()
         }
         // Hidden state: cancel the pending inactivity hide (it just
@@ -2870,18 +2885,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Touch dispatcher hook. Every finger-down on the activity is treated
-     * as fresh user activity: it re-reveals the chrome if it was hidden
-     * and re-arms the inactivity timer. We intentionally only act on
-     * ACTION_DOWN — ACTION_MOVE fires hundreds of times during a scroll
-     * gesture and would jitter our reveal logic; ACTION_UP is too late.
+     * Touch dispatcher hook. Every finger-down re-arms the inactivity
+     * timer so a slow-but-continuous reader doesn't get the chrome pulled
+     * out from under them mid-session.
+     *
+     * We deliberately do NOT call [setChromeHidden](false) here. Doing so
+     * re-showed the bar at the start of every new scroll stroke (ACTION_DOWN
+     * fires once per finger-down, i.e. between every scroll swipe), which
+     * meant the bar could never stay hidden — it flashed back on the very
+     * first touch of each swipe. The bar reveals instead via:
+     *  - scrolling back up past [showTriggerPx] (in [onWebScroll])
+     *  - reaching the top of the page (scrollY ≤ topZonePx, same function)
+     *  - page load / tab switch (in onPageStarted / switchToTab)
      *
      * Always returns the super result so the underlying view tree gets
      * the event unmodified.
      */
     override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
         if (ev?.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
-            if (chromeHidden) setChromeHidden(false)
             scheduleAutoHide()
         }
         return super.dispatchTouchEvent(ev)
@@ -3114,23 +3135,27 @@ class MainActivity : AppCompatActivity() {
         // tap left a site (e.g. chatgpt.com) auto-denied forever with
         // no dialog and no obvious way back. Reloading always
         // re-prompts. Private tabs never persist anything.
-        MaterialAlertDialogBuilder(this)
+        inFlightPermissionDialog = MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.website_permission_title, origin))
             .setMessage(getString(R.string.website_permission_message, origin, requestedAccess))
             .setPositiveButton(R.string.allow_always) { _, _ ->
+                inFlightPermissionDialog = null
                 if (!tab.isPrivate) {
                     kinds.forEach { SitePermissionStore.remember(rawOrigin, it, allow = true) }
                 }
                 grantWebsitePermission(tab, request, supportedResources)
             }
             .setNeutralButton(R.string.allow_once) { _, _ ->
+                inFlightPermissionDialog = null
                 grantWebsitePermission(tab, request, supportedResources)
             }
             .setNegativeButton(R.string.deny) { _, _ ->
+                inFlightPermissionDialog = null
                 request.deny()
                 permissionInFlightTabId = null
             }
             .setOnCancelListener {
+                inFlightPermissionDialog = null
                 request.deny()
                 permissionInFlightTabId = null
             }
