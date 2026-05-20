@@ -333,7 +333,7 @@ class MainActivity : AppCompatActivity() {
      * already-cancelled request, which WebView silently ignores, leaving the
      * camera/mic perpetually broken for that visit.
      */
-    private var inFlightPermissionDialog: android.app.AlertDialog? = null
+    private var inFlightPermissionDialog: android.app.Dialog? = null
 
     // HTML5 fullscreen state (e.g. YouTube tap-to-fullscreen). Populated when
     // a page calls Element.requestFullscreen() and WebChromeClient hands us a
