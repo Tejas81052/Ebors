@@ -305,6 +305,23 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
     }
 
     /**
+     * True until [markSitePermissionsReset] is called. Gates a one-time
+     * wipe of [SitePermissionStore]. An earlier build let a single
+     * "Block" tap persist a silent, permanent per-site denial — which
+     * left sites like chatgpt.com auto-denied with no prompt and no way
+     * back. The persistent-block behaviour is gone now (only
+     * "Always allow" persists), but stale BLOCK entries from the old
+     * build are still on disk; this flag drives clearing them once so
+     * every site re-prompts cleanly.
+     */
+    val needsSitePermissionReset: Boolean
+        get() = !prefs.getBoolean(KEY_SITE_PERMISSIONS_RESET, false)
+
+    fun markSitePermissionsReset() {
+        prefs.edit { putBoolean(KEY_SITE_PERMISSIONS_RESET, true) }
+    }
+
+    /**
      * v10 user-selectable accent colour. Stored as one of the keys
      * defined in [AccentTheme]; an unknown value falls back to the
      * terracotta default at read time so we never paint a missing
@@ -344,6 +361,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         private const val KEY_ONBOARDING_COMPLETED = "key_onboarding_completed"
         private const val KEY_TERMS_ACCEPTED_AT = "key_terms_accepted_at"
         private const val KEY_WEBRTC_DEFAULT_CORRECTED = "key_webrtc_default_corrected_v1"
+        private const val KEY_SITE_PERMISSIONS_RESET = "key_site_permissions_reset_v1"
 
         private const val DEFAULT_SEARCH_ENGINE = "duckduckgo"
 

@@ -576,6 +576,14 @@ class MainActivity : AppCompatActivity() {
         }
         BlockedSitesRepository.initialize(applicationContext)
         SitePermissionStore.initialize(applicationContext)
+        // One-time wipe of stale per-site permission decisions from a
+        // build that persisted silent "Block" entries (which trapped
+        // sites like chatgpt.com into never re-prompting). Persistent
+        // block is gone now; this clears the leftovers once.
+        if (prefs.needsSitePermissionReset) {
+            SitePermissionStore.clearAll()
+            prefs.markSitePermissionsReset()
+        }
 
         // Wipe any leftover private profile from a previous run before
         // the first WebView gets built. If the process died with
@@ -2802,43 +2810,50 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Size the WebView container so its bottom edge sits *above* the
-     * bottom navigation when the chrome is visible, and fills the whole
-     * area when the chrome is hidden. Driven by [setChromeHidden] and
-     * called once at bind time so the very first paint is already inset.
+     * Shrink the actual WebView so its bottom edge sits *above* the
+     * bottom navigation while the chrome is visible, and let it fill
+     * the whole area when the chrome hides. This is what makes a page's
+     * `100vh` (YouTube Shorts' video, any sticky bottom bar) reflow to
+     * the visible region instead of hiding behind our nav.
      *
-     * The bottom chrome's height is 0 until the view tree's first
-     * layout pass; when we're asked to inset before that, defer to the
-     * next layout via [View.post] and re-read the resolved height.
+     * Why bottom **padding on web_host** rather than a margin on
+     * web_container: web_container carries
+     * `appbar_scrolling_view_behavior`, and AppBarLayout's
+     * ScrollingViewBehavior re-measures the scrolling view to fill the
+     * full height below the AppBar on every layout pass — it ignores
+     * the view's bottomMargin, so a margin there is silently dropped
+     * (this was the "nothing changed" bug). web_host is a plain
+     * FrameLayout with no behavior; padding-bottom on it measures its
+     * MATCH_PARENT child (the WebView) to `height − padding`, so the
+     * WebView truly resizes and the page sees a smaller viewport.
+     *
+     * bottomChrome.height is 0 until the first layout pass; if asked to
+     * inset before then, defer to the next layout and re-read.
      */
     private fun applyWebContainerBottomInset(chromeVisible: Boolean) {
-        val params = webContainer.layoutParams as? CoordinatorLayout.LayoutParams ?: return
-        if (!chromeVisible) {
-            if (params.bottomMargin != 0) {
-                params.bottomMargin = 0
-                webContainer.layoutParams = params
+        fun setBottomPadding(px: Int) {
+            if (webHost.paddingBottom != px) {
+                webHost.setPadding(
+                    webHost.paddingLeft,
+                    webHost.paddingTop,
+                    webHost.paddingRight,
+                    px,
+                )
             }
+        }
+        if (!chromeVisible) {
+            setBottomPadding(0)
             return
         }
         val height = bottomChrome.height
         if (height == 0) {
             bottomChrome.post {
-                // The chrome may have hidden again between post and run.
-                if (chromeHidden) return@post
-                val deferred = webContainer.layoutParams as? CoordinatorLayout.LayoutParams
-                    ?: return@post
-                val resolved = bottomChrome.height
-                if (deferred.bottomMargin != resolved) {
-                    deferred.bottomMargin = resolved
-                    webContainer.layoutParams = deferred
-                }
+                // Chrome may have hidden again between post and run.
+                if (!chromeHidden) setBottomPadding(bottomChrome.height)
             }
             return
         }
-        if (params.bottomMargin != height) {
-            params.bottomMargin = height
-            webContainer.layoutParams = params
-        }
+        setBottomPadding(height)
     }
 
     // ---------------------------------------------------------------------
@@ -3135,11 +3150,14 @@ class MainActivity : AppCompatActivity() {
         // prompt that arrives while this one is on screen also gets denied.
         permissionInFlightTabId = tab.id
 
-        // Three-way prompt: Always allow / Allow this time / Block. The
-        // "always" choices persist a per-site decision so the user isn't
-        // re-prompted on every getUserMedia call (maps, video sites,
-        // QR scanners re-request constantly). "Allow this time" grants
-        // without persisting. Private tabs skip persistence entirely.
+        // Three-way prompt: Always allow / Allow this time / Deny.
+        // Only "Always allow" persists a decision (so maps / video /
+        // QR sites that re-request on every call aren't re-prompted).
+        // "Deny" denies THIS request only — it never stores a silent,
+        // permanent block, because that turned into a trap: one stray
+        // tap left a site (e.g. chatgpt.com) auto-denied forever with
+        // no dialog and no obvious way back. Reloading always
+        // re-prompts. Private tabs never persist anything.
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.website_permission_title, origin))
             .setMessage(getString(R.string.website_permission_message, origin, requestedAccess))
@@ -3152,10 +3170,7 @@ class MainActivity : AppCompatActivity() {
             .setNeutralButton(R.string.allow_once) { _, _ ->
                 grantWebsitePermission(tab, request, supportedResources)
             }
-            .setNegativeButton(R.string.block_always) { _, _ ->
-                if (!tab.isPrivate) {
-                    kinds.forEach { SitePermissionStore.remember(rawOrigin, it, allow = false) }
-                }
+            .setNegativeButton(R.string.deny) { _, _ ->
                 request.deny()
                 permissionInFlightTabId = null
             }
@@ -3307,10 +3322,8 @@ class MainActivity : AppCompatActivity() {
             .setNeutralButton(R.string.allow_once) { _, _ ->
                 grantGeolocation(tab, origin, callback)
             }
-            .setNegativeButton(R.string.block_always) { _, _ ->
-                if (!tab.isPrivate) {
-                    SitePermissionStore.remember(origin, SitePermissionStore.Kind.LOCATION, allow = false)
-                }
+            .setNegativeButton(R.string.deny) { _, _ ->
+                // Deny this request only; never persist a silent block.
                 callback.invoke(origin, false, false)
                 geolocationInFlightTabId = null
                 showToast(getString(R.string.location_denied))
