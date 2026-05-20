@@ -223,7 +223,7 @@
     <string name="about_version_label">Version %1$s</string>
     <string name="about_copyright">© 2025 Tejas Thimmaiah. Licensed under the Apache License, Version 2.0.</string>
     <string name="about_engine">Rendering engine: Android System WebView (Chromium-based).</string>
-    <string name="about_known_limitation">Note: voice search on websites that use the Web Speech API (e.g. Google\'s mic button) is unavailable. The system WebView does not implement Web Speech recognition; only Chrome on the same device does. Standard microphone access via getUserMedia (used by video calls, voice messages, etc.) works normally.</string>
+    <string name="about_known_limitation">Voice input (the Web Speech API used by mic buttons on sites like Google) is provided through your device\'s built-in speech recognition. It needs a speech-recognition service installed (most devices have one) and microphone permission. Accuracy and language support come from that service.</string>
     <string name="setting_open_source_licenses_title">Open-source licenses</string>
     <string name="setting_open_source_licenses_summary">Third-party libraries used by Ebors.</string>
     <string name="open_source_licenses_title">Open-source licenses</string>

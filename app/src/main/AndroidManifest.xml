@@ -14,6 +14,19 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!--
+      Package-visibility query (Android 11+ / API 30+). Without this,
+      the platform hides the speech-recognition service from us and
+      SpeechRecognizer.isRecognitionAvailable() returns false, breaking
+      the Web Speech API polyfill. Declaring the RecognitionService
+      intent lets us see and bind to the device's recogniser.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
+    <!--
       None of the hardware features below are *required* for the browser to
       run. The permissions exist so that web pages may request camera, mic,
       or location at runtime, but a device without them still installs and

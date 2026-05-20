@@ -728,6 +728,9 @@ class MainActivity : AppCompatActivity() {
         // post that fires after onDestroy would call setChromeHidden
         // on torn-down views.
         inactivityHandler.removeCallbacksAndMessages(null)
+        // Release the native speech recognizer if a session was live.
+        speechActive = false
+        destroySpeechRecognizer()
         val hadPrivateTabs = tabs.any { it.isPrivate }
         // Detach the active tab's WebView from the container *before*
         // destroying. The platform docs are explicit: "destroy() should
@@ -1660,6 +1663,221 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Speech recognition (Web Speech API polyfill)
+    // ---------------------------------------------------------------------
+    //
+    // Android's system WebView ships no Web Speech engine, so
+    // `webkitSpeechRecognition` is undefined and every site that feature-
+    // detects it (Google's mic button, dictation widgets, voice search
+    // boxes) hides the control. We close that gap by:
+    //
+    //   1. injecting [SPEECH_POLYFILL_SCRIPT] at document start, which
+    //      defines window.SpeechRecognition / webkitSpeechRecognition and
+    //      routes start/stop into the native bridge below;
+    //   2. driving Android's android.speech.SpeechRecognizer here and
+    //      posting transcripts / errors / lifecycle events back into the
+    //      page via evaluateJavascript.
+    //
+    // Only one session runs at a time, always tied to the foreground tab.
+    // RECORD_AUDIO is requested through [speechAudioPermissionLauncher]
+    // the first time and reused thereafter.
+
+    private var speechRecognizer: android.speech.SpeechRecognizer? = null
+    private var speechActive = false
+    private var speechContinuous = false
+    private var speechInterim = false
+    private var speechLang = ""
+
+    /** Start params stashed while the RECORD_AUDIO runtime prompt is up. */
+    private var pendingSpeechStart: Triple<String, Boolean, Boolean>? = null
+
+    private val speechAudioPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val pending = pendingSpeechStart
+            pendingSpeechStart = null
+            if (granted && pending != null) {
+                beginSpeechRecognition(pending.first, pending.second, pending.third)
+            } else {
+                // Mirror the Web Speech API's "not-allowed" error so the
+                // page can surface a sensible message.
+                emitSpeechError("not-allowed")
+                emitSpeechEnd()
+            }
+        }
+
+    private inner class SpeechRecognitionBridge(private val tab: Tab) {
+        @JavascriptInterface
+        fun start(lang: String?, continuous: Boolean, interim: Boolean) {
+            runOnUiThread {
+                // Only the foreground tab may grab the mic.
+                if (tab !== activeTabOrNull) {
+                    emitSpeechError("aborted")
+                    emitSpeechEnd()
+                    return@runOnUiThread
+                }
+                if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                    beginSpeechRecognition(lang.orEmpty(), continuous, interim)
+                } else {
+                    pendingSpeechStart = Triple(lang.orEmpty(), continuous, interim)
+                    speechAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stop() {
+            runOnUiThread { runCatching { speechRecognizer?.stopListening() } }
+        }
+
+        @JavascriptInterface
+        fun abort() {
+            runOnUiThread {
+                speechActive = false
+                destroySpeechRecognizer()
+                emitSpeechEnd()
+            }
+        }
+    }
+
+    private fun beginSpeechRecognition(lang: String, continuous: Boolean, interim: Boolean) {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+            // No on-device recognition service (some AOSP / Go builds).
+            emitSpeechError("service-not-allowed")
+            emitSpeechEnd()
+            return
+        }
+        destroySpeechRecognizer()
+        speechLang = lang
+        speechContinuous = continuous
+        speechInterim = interim
+        speechActive = true
+
+        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer = recognizer
+        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) = emitSpeechStart()
+            override fun onBeginningOfSpeech() = Unit
+            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onBufferReceived(buffer: ByteArray?) = Unit
+            override fun onEndOfSpeech() = Unit
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (!speechInterim) return
+                val text = partialResults
+                    ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    .orEmpty()
+                if (text.isNotBlank()) emitSpeechResult(text, isFinal = false)
+            }
+
+            override fun onResults(results: Bundle?) {
+                val text = results
+                    ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    .orEmpty()
+                if (text.isNotBlank()) emitSpeechResult(text, isFinal = true)
+                if (speechContinuous && speechActive) {
+                    // Web Speech "continuous" keeps the session alive across
+                    // utterances; Android's recognizer ends after one. Re-arm.
+                    restartSpeechListening()
+                } else {
+                    speechActive = false
+                    destroySpeechRecognizer()
+                    emitSpeechEnd()
+                }
+            }
+
+            override fun onError(error: Int) {
+                val code = mapSpeechError(error)
+                // A "no match"/"speech timeout" mid-continuous-session is
+                // recoverable: keep listening rather than tearing down.
+                val recoverable = speechContinuous && speechActive &&
+                    (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
+                        error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                if (recoverable) {
+                    restartSpeechListening()
+                    return
+                }
+                emitSpeechError(code)
+                speechActive = false
+                destroySpeechRecognizer()
+                emitSpeechEnd()
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) = Unit
+        })
+
+        runCatching { recognizer.startListening(buildSpeechIntent()) }
+            .onFailure {
+                emitSpeechError("audio-capture")
+                speechActive = false
+                destroySpeechRecognizer()
+                emitSpeechEnd()
+            }
+    }
+
+    private fun restartSpeechListening() {
+        val recognizer = speechRecognizer ?: return
+        runCatching {
+            recognizer.cancel()
+            recognizer.startListening(buildSpeechIntent())
+        }.onFailure {
+            speechActive = false
+            destroySpeechRecognizer()
+            emitSpeechEnd()
+        }
+    }
+
+    private fun buildSpeechIntent(): Intent =
+        Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            if (speechLang.isNotBlank()) {
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, speechLang)
+            }
+            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, speechInterim)
+            // Caller package is required on some OEM recognizers.
+            putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+    private fun destroySpeechRecognizer() {
+        val recognizer = speechRecognizer ?: return
+        speechRecognizer = null
+        runCatching { recognizer.destroy() }
+    }
+
+    private fun mapSpeechError(error: Int): String = when (error) {
+        android.speech.SpeechRecognizer.ERROR_AUDIO -> "audio-capture"
+        android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "not-allowed"
+        android.speech.SpeechRecognizer.ERROR_NETWORK,
+        android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network"
+        android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "no-speech"
+        android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "no-speech"
+        android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "aborted"
+        android.speech.SpeechRecognizer.ERROR_CLIENT -> "aborted"
+        else -> "service-not-allowed"
+    }
+
+    /** Push a JS snippet into the foreground tab's speech polyfill. */
+    private fun dispatchSpeechJs(js: String) {
+        activeTabOrNull?.webView?.evaluateJavascript(
+            "if(window.__eborsSpeech){try{window.__eborsSpeech.$js}catch(e){}}",
+            null,
+        )
+    }
+
+    private fun emitSpeechStart() = dispatchSpeechJs("_fire('start');")
+    private fun emitSpeechEnd() = dispatchSpeechJs("_end();")
+
+    private fun emitSpeechError(code: String) =
+        dispatchSpeechJs("_error(${org.json.JSONObject.quote(code)});")
+
+    private fun emitSpeechResult(transcript: String, isFinal: Boolean) =
+        dispatchSpeechJs("_result(${org.json.JSONObject.quote(transcript)}, $isFinal);")
+
     private fun isYouTubeHost(url: String): Boolean {
         return try {
             val host = Uri.parse(url).host?.lowercase() ?: return false
@@ -1751,6 +1969,15 @@ class MainActivity : AppCompatActivity() {
         target.addJavascriptInterface(
             ShortsLayoutBridge(tab),
             SHORTS_LAYOUT_BRIDGE_NAME,
+        )
+        // Speech-recognition bridge. The companion polyfill
+        // ([SPEECH_POLYFILL_SCRIPT], injected at document start) calls
+        // into this to drive Android's native SpeechRecognizer. Owns a
+        // [Tab] reference so a background tab's page can't hijack the
+        // mic or steer results into the foreground tab.
+        target.addJavascriptInterface(
+            SpeechRecognitionBridge(tab),
+            SPEECH_BRIDGE_NAME,
         )
 
         // Long-press context menu for links + images. We deliberately
@@ -2260,6 +2487,19 @@ class MainActivity : AppCompatActivity() {
                     "https://youtube.com",
                     "https://*.youtube.com",
                 ),
+            )
+        }
+
+        // Speech-recognition polyfill. Installs window.webkitSpeechRecognition
+        // (and SpeechRecognition) backed by the native [SpeechRecognitionBridge]
+        // so voice features that the system WebView lacks (it ships no Web
+        // Speech engine) start working. http(s) only; idempotent per page
+        // via a window flag inside the script.
+        if (tab.speechDocumentStartScript == null) {
+            tab.speechDocumentStartScript = addDocumentStartScript(
+                tab.webView,
+                SPEECH_POLYFILL_SCRIPT,
+                setOf("https://*", "http://*"),
             )
         }
 
@@ -3173,7 +3413,29 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
+        // Pull the W3C-/Chrome-standard `browser_fallback_url` out of the
+        // intent BEFORE sanitising. Sites that hand off to a native app
+        // via intent:// (Google Lens for the camera, "open in Maps" for
+        // location, app deep links) embed this so the browser can show a
+        // web page when the app isn't installed — or when a hardened
+        // browser like ours refuses the raw intent. Without honouring it
+        // the user just hit a dead-end "only web links are supported"
+        // toast, which is exactly the camera/location failure reported.
+        // Only http(s) fallbacks are accepted; a javascript:/data:
+        // fallback would be a script-injection vector.
+        val fallbackUrl = intent.getStringExtra("browser_fallback_url")
+            ?.takeIf {
+                it.startsWith("http://", ignoreCase = true) ||
+                    it.startsWith("https://", ignoreCase = true)
+            }
+
         if (!sanitizeExternalIntent(intent)) {
+            // Rejected by the action allowlist. Degrade to the site's
+            // fallback web page if it provided one.
+            if (fallbackUrl != null) {
+                loadAddress(fallbackUrl)
+                return true
+            }
             showToast(getString(R.string.unsupported_link_message))
             return true
         }
@@ -3182,10 +3444,16 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
             true
         } catch (_: ActivityNotFoundException) {
-            showToast(getString(R.string.unsupported_link_message))
+            // No app installed to handle the intent → fallback page,
+            // else the standard toast.
+            if (fallbackUrl != null) loadAddress(fallbackUrl) else {
+                showToast(getString(R.string.unsupported_link_message))
+            }
             true
         } catch (_: SecurityException) {
-            showToast(getString(R.string.unsupported_link_message))
+            if (fallbackUrl != null) loadAddress(fallbackUrl) else {
+                showToast(getString(R.string.unsupported_link_message))
+            }
             true
         }
     }
@@ -4228,6 +4496,128 @@ class MainActivity : AppCompatActivity() {
          * convention as [REFRESH_GUARD_BRIDGE_NAME].
          */
         private const val SHORTS_LAYOUT_BRIDGE_NAME = "__eborsShortsLayout"
+
+        /** Name of the [SpeechRecognitionBridge] window-global. The
+         *  polyfill in [SPEECH_POLYFILL_SCRIPT] looks this up. */
+        private const val SPEECH_BRIDGE_NAME = "__eborsSpeechBridge"
+
+        /**
+         * Web Speech API polyfill. Defines window.SpeechRecognition /
+         * window.webkitSpeechRecognition backed by the native
+         * [SpeechRecognitionBridge] (Android's SpeechRecognizer). The
+         * system WebView ships no Web Speech engine, so without this
+         * `webkitSpeechRecognition` is undefined and sites hide their
+         * voice controls.
+         *
+         * Scope is intentionally minimal but covers the surface real
+         * sites use: `start()`, `stop()`, `abort()`, the `lang` /
+         * `continuous` / `interimResults` properties, and the
+         * `onstart` / `onresult` / `onerror` / `onend` callbacks (plus
+         * addEventListener equivalents). The `results` object handed to
+         * `onresult` mimics SpeechRecognitionResultList closely enough
+         * for `event.results[i][0].transcript` and `.isFinal` access.
+         *
+         * Idempotent: a window flag stops re-installation when the
+         * document-start script and any onPageFinished re-injection
+         * overlap. Only one recognition instance is "active" at a time
+         * (the last one whose start() ran) — native results are routed
+         * to it.
+         */
+        private const val SPEECH_POLYFILL_SCRIPT = """
+            (function() {
+                try {
+                    if (window.__eborsSpeechInstalled) return;
+                    var bridge = window.$SPEECH_BRIDGE_NAME;
+                    if (!bridge || typeof bridge.start !== 'function') return;
+                    window.__eborsSpeechInstalled = true;
+
+                    var active = null;
+
+                    function Recognition() {
+                        this.lang = '';
+                        this.continuous = false;
+                        this.interimResults = false;
+                        this.maxAlternatives = 1;
+                        this.onstart = null;
+                        this.onaudiostart = null;
+                        this.onspeechstart = null;
+                        this.onspeechend = null;
+                        this.onresult = null;
+                        this.onerror = null;
+                        this.onend = null;
+                        this._listeners = {};
+                    }
+                    Recognition.prototype.start = function() {
+                        active = this;
+                        try {
+                            bridge.start(this.lang || '', !!this.continuous, !!this.interimResults);
+                        } catch (e) {}
+                    };
+                    Recognition.prototype.stop = function() {
+                        try { bridge.stop(); } catch (e) {}
+                    };
+                    Recognition.prototype.abort = function() {
+                        try { bridge.abort(); } catch (e) {}
+                    };
+                    Recognition.prototype.addEventListener = function(type, fn) {
+                        if (!this._listeners[type]) this._listeners[type] = [];
+                        this._listeners[type].push(fn);
+                    };
+                    Recognition.prototype.removeEventListener = function(type, fn) {
+                        var a = this._listeners[type];
+                        if (!a) return;
+                        var i = a.indexOf(fn);
+                        if (i >= 0) a.splice(i, 1);
+                    };
+                    Recognition.prototype._dispatch = function(type, ev) {
+                        var h = this['on' + type];
+                        if (typeof h === 'function') { try { h.call(this, ev); } catch (e) {} }
+                        var a = this._listeners[type];
+                        if (a) for (var i = 0; i < a.length; i++) {
+                            try { a[i].call(this, ev); } catch (e) {}
+                        }
+                    };
+
+                    function makeEvent(type) {
+                        try { return new Event(type); }
+                        catch (e) { return { type: type }; }
+                    }
+
+                    window.__eborsSpeech = {
+                        _fire: function(name) {
+                            if (active) active._dispatch(name, makeEvent(name));
+                        },
+                        _result: function(transcript, isFinal) {
+                            if (!active) return;
+                            var ev = makeEvent('result');
+                            var alt = { transcript: transcript, confidence: 0.9 };
+                            var result = [alt];
+                            result.isFinal = isFinal;
+                            result.length = 1;
+                            result.item = function(i) { return this[i]; };
+                            var list = [result];
+                            list.length = 1;
+                            list.item = function(i) { return this[i]; };
+                            ev.results = list;
+                            ev.resultIndex = 0;
+                            active._dispatch('result', ev);
+                        },
+                        _error: function(code) {
+                            if (!active) return;
+                            var ev = makeEvent('error');
+                            ev.error = code;
+                            active._dispatch('error', ev);
+                        },
+                        _end: function() {
+                            if (active) active._dispatch('end', makeEvent('end'));
+                        }
+                    };
+
+                    if (!window.SpeechRecognition) window.SpeechRecognition = Recognition;
+                    if (!window.webkitSpeechRecognition) window.webkitSpeechRecognition = Recognition;
+                } catch (e) { /* ignore */ }
+            })();
+        """
 
         /**
          * Polls `location.pathname` on YouTube pages and tells native

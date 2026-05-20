@@ -119,6 +119,15 @@ class Tab(
     var privacyDocumentStartFlags: Int = DOCUMENT_START_FLAGS_UNSET
 
     /**
+     * Document-start hook that installs the `webkitSpeechRecognition`
+     * polyfill (backed by Android's native SpeechRecognizer via a JS
+     * bridge). Injected at document start so a page's early feature
+     * detection sees the API and shows its voice button — onPageFinished
+     * would be too late for sites that probe at load. http(s) only.
+     */
+    var speechDocumentStartScript: ScriptHandler? = null
+
+    /**
      * Downscaled bitmap of the WebView's last visible state, painted
      * inside the tab-switcher card so the user sees real page content
      * instead of skeleton placeholders.
@@ -216,8 +225,10 @@ class Tab(
     fun removeDocumentStartScripts() {
         runCatching { youTubeDocumentStartScript?.remove() }
         runCatching { privacyDocumentStartScript?.remove() }
+        runCatching { speechDocumentStartScript?.remove() }
         youTubeDocumentStartScript = null
         privacyDocumentStartScript = null
+        speechDocumentStartScript = null
         privacyDocumentStartFlags = DOCUMENT_START_FLAGS_UNSET
     }
 
