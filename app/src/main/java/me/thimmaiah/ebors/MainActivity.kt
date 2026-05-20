@@ -411,9 +411,18 @@ class MainActivity : AppCompatActivity() {
                 pending.request.grant(grantableResources.toTypedArray())
             } else {
                 pending.request.deny()
-                if (tab === activeTabOrNull) {
-                    showToast(getString(R.string.website_permission_denied))
-                }
+                // The Android-level permission was refused. If the user
+                // hard-denied it (checked "don't ask again" or denied
+                // twice), Android won't show the system prompt again —
+                // the only path to enable it is the app's settings page.
+                // Detect that and offer to jump there, instead of
+                // failing silently forever (the "camera just doesn't
+                // work" complaint).
+                val deniedPermissions = pending.resources
+                    .flatMap(::requiredAndroidPermissions)
+                    .distinct()
+                    .filterNot(::hasPermission)
+                offerAppSettingsIfPermanentlyDenied(tab, deniedPermissions)
             }
         }
 
@@ -429,8 +438,12 @@ class MainActivity : AppCompatActivity() {
                 grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
                 hasAnyLocationPermission()
             pending.callback.invoke(pending.origin, granted, false)
-            if (!granted && tab === activeTabOrNull) {
-                showToast(getString(R.string.location_denied))
+            if (!granted) {
+                val deniedPermissions = listOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ).filterNot(::hasPermission)
+                offerAppSettingsIfPermanentlyDenied(tab, deniedPermissions)
             }
         }
 
@@ -557,6 +570,7 @@ class MainActivity : AppCompatActivity() {
             BlocklistUpdater.checkForUpdate(applicationContext, force = false)
         }
         BlockedSitesRepository.initialize(applicationContext)
+        SitePermissionStore.initialize(applicationContext)
 
         // Wipe any leftover private profile from a previous run before
         // the first WebView gets built. If the process died with
@@ -2801,7 +2815,26 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val origin = extractOriginLabel(request.origin?.toString())
+        val rawOrigin = request.origin?.toString()
+        val kinds = supportedResources.mapNotNull(::resourceToKind).distinct()
+
+        // Per-site memory (regular tabs only — private tabs are always
+        // session-scoped). If the user previously chose "Always allow"
+        // for every capability in this request, grant without a prompt;
+        // if they chose "Block" for any of them, deny without a prompt.
+        if (!tab.isPrivate && kinds.isNotEmpty()) {
+            val decisions = kinds.map { SitePermissionStore.decisionFor(rawOrigin, it) }
+            if (decisions.all { it == SitePermissionStore.Decision.ALLOW }) {
+                grantWebsitePermission(tab, request, supportedResources)
+                return
+            }
+            if (decisions.any { it == SitePermissionStore.Decision.BLOCK }) {
+                request.deny()
+                return
+            }
+        }
+
+        val origin = extractOriginLabel(rawOrigin)
         val requestedAccess = supportedResources.joinToString(separator = getString(R.string.permission_joiner)) {
             when (it) {
                 PermissionRequest.RESOURCE_AUDIO_CAPTURE -> getString(R.string.microphone_permission_label)
@@ -2814,32 +2847,27 @@ class MainActivity : AppCompatActivity() {
         // prompt that arrives while this one is on screen also gets denied.
         permissionInFlightTabId = tab.id
 
+        // Three-way prompt: Always allow / Allow this time / Block. The
+        // "always" choices persist a per-site decision so the user isn't
+        // re-prompted on every getUserMedia call (maps, video sites,
+        // QR scanners re-request constantly). "Allow this time" grants
+        // without persisting. Private tabs skip persistence entirely.
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.website_permission_title, origin))
             .setMessage(getString(R.string.website_permission_message, origin, requestedAccess))
-            .setPositiveButton(R.string.allow_once) { _, _ ->
-                val missingPermissions = supportedResources
-                    .flatMap(::requiredAndroidPermissions)
-                    .distinct()
-                    .filterNot(::hasPermission)
-
-                if (missingPermissions.isEmpty()) {
-                    request.grant(supportedResources.toTypedArray())
-                    permissionInFlightTabId = null
-                } else {
-                    // Keep the in-flight slot held; the launcher result
-                    // handler will clear it when the Android prompt
-                    // resolves. The pending request lives on the tab so
-                    // there's no way to cross-wire it with another tab's
-                    // grant.
-                    tab.pendingWebsitePermission = Tab.PendingWebsitePermission(
-                        request = request,
-                        resources = supportedResources,
-                    )
-                    websitePermissionLauncher.launch(missingPermissions.toTypedArray())
+            .setPositiveButton(R.string.allow_always) { _, _ ->
+                if (!tab.isPrivate) {
+                    kinds.forEach { SitePermissionStore.remember(rawOrigin, it, allow = true) }
                 }
+                grantWebsitePermission(tab, request, supportedResources)
             }
-            .setNegativeButton(R.string.deny) { _, _ ->
+            .setNeutralButton(R.string.allow_once) { _, _ ->
+                grantWebsitePermission(tab, request, supportedResources)
+            }
+            .setNegativeButton(R.string.block_always) { _, _ ->
+                if (!tab.isPrivate) {
+                    kinds.forEach { SitePermissionStore.remember(rawOrigin, it, allow = false) }
+                }
                 request.deny()
                 permissionInFlightTabId = null
             }
@@ -2848,6 +2876,98 @@ class MainActivity : AppCompatActivity() {
                 permissionInFlightTabId = null
             }
             .show()
+    }
+
+    /**
+     * Grant a website media permission, requesting the matching Android
+     * runtime permission first if we don't already hold it. Sets the
+     * in-flight tab id so the launcher callback can route the Android
+     * result back to the originating tab. Called from both the
+     * remembered-allow fast path and the dialog's allow buttons.
+     */
+    private fun grantWebsitePermission(
+        tab: Tab,
+        request: PermissionRequest,
+        resources: List<String>,
+    ) {
+        val missingPermissions = resources
+            .flatMap(::requiredAndroidPermissions)
+            .distinct()
+            .filterNot(::hasPermission)
+
+        if (missingPermissions.isEmpty()) {
+            request.grant(resources.toTypedArray())
+            permissionInFlightTabId = null
+        } else {
+            // Hold the in-flight slot; the launcher callback clears it
+            // and resolves the grant against the originating tab.
+            permissionInFlightTabId = tab.id
+            tab.pendingWebsitePermission = Tab.PendingWebsitePermission(
+                request = request,
+                resources = resources,
+            )
+            websitePermissionLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
+
+    private fun resourceToKind(resource: String): SitePermissionStore.Kind? = when (resource) {
+        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> SitePermissionStore.Kind.MICROPHONE
+        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> SitePermissionStore.Kind.CAMERA
+        else -> null
+    }
+
+    /**
+     * After an Android runtime-permission request comes back denied,
+     * decide whether the user can still recover. If any denied
+     * permission is *permanently* denied (the system will no longer
+     * show its prompt — [shouldShowRequestPermissionRationale] returns
+     * false after a denial), offer a jump to the app's settings page
+     * where they can flip it back on. Otherwise it was a soft "Deny"
+     * and a toast is enough.
+     *
+     * Only surfaces UI for the foreground tab — a background tab's
+     * denied request shouldn't pop a dialog over whatever the user is
+     * looking at now.
+     */
+    private fun offerAppSettingsIfPermanentlyDenied(tab: Tab, deniedPermissions: List<String>) {
+        if (tab !== activeTabOrNull || deniedPermissions.isEmpty()) return
+        val permanentlyDenied = deniedPermissions.any { !shouldShowRequestPermissionRationale(it) }
+        if (!permanentlyDenied) {
+            showToast(getString(R.string.website_permission_denied))
+            return
+        }
+        val label = deniedPermissions.joinToString(getString(R.string.permission_joiner)) {
+            when (it) {
+                Manifest.permission.CAMERA -> getString(R.string.camera_permission_label)
+                Manifest.permission.RECORD_AUDIO -> getString(R.string.microphone_permission_label)
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION ->
+                    getString(R.string.location_permission_kind)
+                else -> it
+            }
+        }.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.permission_blocked_in_android_title)
+            .setMessage(getString(R.string.permission_blocked_in_android_message, label))
+            .setPositiveButton(R.string.open_settings) { _, _ -> openAppDetailsSettings() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Open this app's system settings page (App info) so the user can
+     *  flip a permanently-denied runtime permission back on. */
+    private fun openAppDetailsSettings() {
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", packageName, null),
+                ),
+            )
+        } catch (_: ActivityNotFoundException) {
+            // No settings activity (extremely stripped ROM) — nothing
+            // actionable to show.
+        }
     }
 
     private fun handleGeolocationPermissionRequest(
@@ -2867,27 +2987,42 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // Per-site memory (regular tabs only). Maps and weather sites
+        // re-request location constantly; remembering the choice avoids
+        // a prompt on every getCurrentPosition / watchPosition tick.
+        if (!tab.isPrivate) {
+            when (SitePermissionStore.decisionFor(origin, SitePermissionStore.Kind.LOCATION)) {
+                SitePermissionStore.Decision.ALLOW -> {
+                    grantGeolocation(tab, origin, callback)
+                    return
+                }
+                SitePermissionStore.Decision.BLOCK -> {
+                    callback.invoke(origin, false, false)
+                    return
+                }
+                SitePermissionStore.Decision.ASK -> Unit
+            }
+        }
+
         geolocationInFlightTabId = tab.id
 
         val originLabel = extractOriginLabel(origin)
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.location_permission_title, originLabel))
             .setMessage(getString(R.string.location_permission_message, originLabel))
-            .setPositiveButton(R.string.allow_once) { _, _ ->
-                if (hasAnyLocationPermission()) {
-                    callback.invoke(origin, true, false)
-                    geolocationInFlightTabId = null
-                } else {
-                    tab.pendingGeolocation = Tab.PendingGeolocation(origin, callback)
-                    geolocationPermissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION,
-                        ),
-                    )
+            .setPositiveButton(R.string.allow_always) { _, _ ->
+                if (!tab.isPrivate) {
+                    SitePermissionStore.remember(origin, SitePermissionStore.Kind.LOCATION, allow = true)
                 }
+                grantGeolocation(tab, origin, callback)
             }
-            .setNegativeButton(R.string.deny) { _, _ ->
+            .setNeutralButton(R.string.allow_once) { _, _ ->
+                grantGeolocation(tab, origin, callback)
+            }
+            .setNegativeButton(R.string.block_always) { _, _ ->
+                if (!tab.isPrivate) {
+                    SitePermissionStore.remember(origin, SitePermissionStore.Kind.LOCATION, allow = false)
+                }
                 callback.invoke(origin, false, false)
                 geolocationInFlightTabId = null
                 showToast(getString(R.string.location_denied))
@@ -2897,6 +3032,64 @@ class MainActivity : AppCompatActivity() {
                 geolocationInFlightTabId = null
             }
             .show()
+    }
+
+    /**
+     * Resolve a geolocation grant, requesting the Android location
+     * runtime permission first if we don't already hold it. The
+     * geolocation launcher callback routes the Android result back to
+     * the originating tab's pending callback.
+     */
+    private fun grantGeolocation(
+        tab: Tab,
+        origin: String,
+        callback: GeolocationPermissions.Callback,
+    ) {
+        if (hasAnyLocationPermission()) {
+            // Permission is held, so the grant itself can proceed — but
+            // if the device's location *services* are switched off, the
+            // WebView's position fix will silently never arrive and the
+            // site just spins. Surface that distinct failure so the user
+            // knows to flip on GPS rather than blaming the site.
+            callback.invoke(origin, true, false)
+            geolocationInFlightTabId = null
+            if (!isLocationServiceEnabled()) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.location_services_off_title)
+                    .setMessage(R.string.location_services_off_message)
+                    .setPositiveButton(R.string.open_settings) { _, _ ->
+                        try {
+                            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        } catch (_: ActivityNotFoundException) {
+                            // No location-settings activity — nothing to do.
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+        } else {
+            geolocationInFlightTabId = tab.id
+            tab.pendingGeolocation = Tab.PendingGeolocation(origin, callback)
+            geolocationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
+        }
+    }
+
+    /** Whether the device's location master switch is on. WebView
+     *  geolocation returns nothing when this is off, even with the
+     *  runtime permission granted. */
+    private fun isLocationServiceEnabled(): Boolean {
+        val lm = getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            ?: return true // can't tell → don't nag
+        return try {
+            androidx.core.location.LocationManagerCompat.isLocationEnabled(lm)
+        } catch (_: Exception) {
+            true
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -3498,6 +3691,10 @@ class MainActivity : AppCompatActivity() {
         }
         WebStorage.getInstance().deleteAllData()
         HistoryRepository.clear()
+        // Forget every remembered "Always allow / Block" camera, mic,
+        // and location decision so a cleared session starts fresh and
+        // re-prompts per site.
+        SitePermissionStore.clearAll()
         showToast(getString(R.string.clear_browsing_data_done))
         loadAddress(homeUrl())
     }

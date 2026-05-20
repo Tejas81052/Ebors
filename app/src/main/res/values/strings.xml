@@ -33,18 +33,28 @@
     <string name="print_unavailable">Printing isn\'t available on this device.</string>
     <string name="no_page_loaded">Open a page first.</string>
     <string name="allow_once">Allow this time</string>
+    <string name="allow_always">Always allow</string>
     <string name="deny">Deny</string>
+    <string name="block_always">Block</string>
     <string name="this_site">this site</string>
     <string name="website_permission_title">Allow %1$s?</string>
-    <string name="website_permission_message">%1$s wants temporary access to your %2$s.</string>
+    <string name="website_permission_message">%1$s wants access to your %2$s.</string>
     <string name="website_permission_denied">Website access denied.</string>
     <string name="website_permission_unsupported">This website requested an unsupported permission.</string>
     <string name="permission_joiner"> and </string>
     <string name="camera_permission_label">camera</string>
     <string name="microphone_permission_label">microphone</string>
+    <string name="location_permission_kind">location</string>
     <string name="location_permission_title">Share location with %1$s?</string>
-    <string name="location_permission_message">%1$s wants your location for this visit only.</string>
+    <string name="location_permission_message">%1$s wants to access your location.</string>
     <string name="location_denied">Location access denied.</string>
+
+    <!-- Permanently-denied (Android level) recovery -->
+    <string name="permission_blocked_in_android_title">Permission turned off</string>
+    <string name="permission_blocked_in_android_message">%1$s is blocked for Ebors in Android settings, so this site can\'t use it. Open settings to turn it back on?</string>
+    <string name="open_settings">Open settings</string>
+    <string name="location_services_off_title">Location is off</string>
+    <string name="location_services_off_message">Turn on location in your device settings to share it with this site.</string>
 
     <string name="clear_browsing_data">Clear browsing data</string>
     <string name="clear_browsing_data_title">Clear browsing data?</string>
