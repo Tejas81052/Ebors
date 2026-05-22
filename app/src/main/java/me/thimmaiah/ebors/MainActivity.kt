@@ -1905,6 +1905,27 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // Cosmetic hiding + anti-adblock at document-start: the <style> and
+        // detector stubs land before the page's own scripts run, so ad
+        // containers never flash and "disable your adblocker" overlays can't
+        // win the race. Re-install when the aggressive pref flips; remove
+        // entirely when ad blocking is off.
+        if (!prefs.adBlockEnabled) {
+            removeDocumentStartScript(tab.cosmeticDocumentStartScript)
+            tab.cosmeticDocumentStartScript = null
+        } else if (
+            tab.cosmeticDocumentStartScript == null ||
+            tab.cosmeticDocumentStartAggressive != prefs.aggressiveAntiAdblock
+        ) {
+            removeDocumentStartScript(tab.cosmeticDocumentStartScript)
+            tab.cosmeticDocumentStartScript = addDocumentStartScript(
+                tab.webView,
+                BrowserBlocker.cosmeticHidingScript(aggressive = prefs.aggressiveAntiAdblock),
+                setOf("https://*", "http://*"),
+            )
+            tab.cosmeticDocumentStartAggressive = prefs.aggressiveAntiAdblock
+        }
+
         val desiredPrivacyFlags = privacyDocumentStartFlags()
         if (desiredPrivacyFlags == 0) {
             removeDocumentStartScript(tab.privacyDocumentStartScript)
@@ -2132,8 +2153,13 @@ class MainActivity : AppCompatActivity() {
         if (url != null && isYouTubeHost(url)) {
             view.evaluateJavascript(YOUTUBE_SHORTS_LAYOUT_SCRIPT, null)
         }
-        if (prefs.adBlockEnabled) {
-
+        // Cosmetic hiding + anti-adblock normally runs at document-start
+        // (see syncDocumentStartScripts) so ads never flash. Only inject
+        // here as a fallback for WebViews without DOCUMENT_START_SCRIPT,
+        // where document-start registration silently no-ops.
+        if (prefs.adBlockEnabled &&
+            !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        ) {
             view.evaluateJavascript(
                 BrowserBlocker.cosmeticHidingScript(aggressive = prefs.aggressiveAntiAdblock),
                 null,
@@ -2797,6 +2823,7 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.sheet_browser_menu, null)
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(view)
+        sizeQuickActionTiles(view)
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         dialog.setOnShowListener {
             dialog.findViewById<FrameLayout>(com.google.android.material.R.id.design_bottom_sheet)
@@ -2839,6 +2866,7 @@ class MainActivity : AppCompatActivity() {
 
         setMenuTileEnabled(view.findViewById(R.id.menu_share), hasPage)
         setMenuTileEnabled(saveTile, hasPage)
+        setMenuTileEnabled(view.findViewById(R.id.menu_reader), canEnterReaderMode())
         setMenuTileEnabled(view.findViewById(R.id.menu_find), hasPage)
         setMenuTileEnabled(view.findViewById(R.id.menu_backward), tab?.webView?.canGoBack() == true)
         setMenuTileEnabled(view.findViewById(R.id.menu_forward), tab?.webView?.canGoForward() == true)
@@ -2864,6 +2892,10 @@ class MainActivity : AppCompatActivity() {
         saveTile.setOnClickListener {
             dialog.dismiss()
             toggleCurrentPageBookmark(tab)
+        }
+        view.findViewById<View>(R.id.menu_reader).setOnClickListener {
+            dialog.dismiss()
+            enterReaderMode()
         }
         view.findViewById<View>(R.id.menu_find).setOnClickListener {
             dialog.dismiss()
@@ -2908,6 +2940,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    /**
+     * Size the quick-action tiles so exactly four columns fill the sheet
+     * width, the rest panning in horizontally. Done in code rather than
+     * XML because layout_weight collapses to zero inside a
+     * HorizontalScrollView. Posted so the scroller has a measured width.
+     */
+    private fun sizeQuickActionTiles(view: View) {
+        val scroller = view.findViewById<View>(R.id.menu_quick_actions)
+        scroller.post {
+            val gap = dp(10)
+            val available = scroller.width.takeIf { it > 0 }
+                ?: resources.displayMetrics.widthPixels
+            val tileWidth = ((available - dp(20) * 2 - gap * 3) / 4).coerceAtLeast(dp(64))
+            intArrayOf(
+                R.id.menu_share, R.id.menu_save, R.id.menu_reader, R.id.menu_desktop,
+                R.id.menu_private, R.id.menu_find, R.id.menu_backward,
+                R.id.menu_forward, R.id.menu_print,
+            ).forEach { id ->
+                val tile = view.findViewById<View>(id)
+                tile.layoutParams = tile.layoutParams.apply { width = tileWidth }
+            }
+        }
     }
 
     private fun setMenuTileEnabled(tile: View, enabled: Boolean) {

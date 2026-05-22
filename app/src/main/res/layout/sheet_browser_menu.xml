@@ -47,158 +47,185 @@
     </LinearLayout>
 
     <!--
-      Row 1 — Share · Save · Desktop site · Find in page. Reader mode
-      was dropped from the bottom sheet in v10.1 (still reachable from
-      future menu surfaces if/when it returns).
+      Quick actions — two rows of four (the classic grid), wrapped in a
+      HorizontalScrollView so a 9th+ tile pans into view from the right.
+      Horizontal-only, and never infinite: the scroll view only pans when
+      the tiles overflow the viewport. Tile widths are set at runtime in
+      showBrowserMenu so exactly four columns fill the screen on any
+      device (weight-based sizing collapses inside a scroll view).
+        Row 1: Share · Save · Reader · Desktop · [New private]
+        Row 2: Find · Back · Forward · Print
     -->
-    <LinearLayout
+    <HorizontalScrollView
+        android:id="@+id/menu_quick_actions"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp">
+        android:clipToPadding="false"
+        android:overScrollMode="ifContentScrolls"
+        android:scrollbars="none">
 
         <LinearLayout
-            android:id="@+id/menu_share"
-            style="@style/BrowserMenuQuickAction">
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp">
 
-            <ImageView
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_share_24"
-                app:tint="@color/browser_icon" />
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-            <TextView
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/share_page" />
+                <LinearLayout
+                    android:id="@+id/menu_share"
+                    style="@style/BrowserMenuQuickActionScroll">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_share_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/share_page" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_save"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        android:id="@+id/menu_save_icon"
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_bookmark_outline_24"
+                        app:tint="?attr/browserAccent" />
+
+                    <TextView
+                        android:id="@+id/menu_save_label"
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/save_page"
+                        android:textColor="?attr/browserAccent" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_reader"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_reader_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/action_reader_mode" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_desktop"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <!-- icon + label carry IDs so showBrowserMenu can flip
+                         them to an accent-tinted "active" state when desktop
+                         mode is on, the same way Save flips when bookmarked. -->
+                    <ImageView
+                        android:id="@+id/menu_desktop_icon"
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_desktop_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        android:id="@+id/menu_desktop_label"
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/setting_desktop_mode_title" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_private"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_private_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/new_private_tab" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:id="@+id/menu_find"
+                    style="@style/BrowserMenuQuickActionScroll">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_search_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/find_in_page" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_backward"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_arrow_back_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/menu_action_go_backward" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_forward"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_arrow_forward_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/menu_action_go_forward" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_print"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_print_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/menu_print_pdf" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/menu_save"
-            style="@style/BrowserMenuQuickAction"
-            android:layout_marginStart="10dp">
-
-            <ImageView
-                android:id="@+id/menu_save_icon"
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_bookmark_outline_24"
-                app:tint="?attr/browserAccent" />
-
-            <TextView
-                android:id="@+id/menu_save_label"
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/save_page"
-                android:textColor="?attr/browserAccent" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/menu_desktop"
-            style="@style/BrowserMenuQuickAction"
-            android:layout_marginStart="10dp">
-
-            <!-- v10.1: icon + label get IDs so showBrowserMenu can
-                 flip them to an accent-tinted "active" state when
-                 desktop mode is currently on, the same way the Save
-                 tile flips when the page is bookmarked. -->
-            <ImageView
-                android:id="@+id/menu_desktop_icon"
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_desktop_24"
-                app:tint="@color/browser_icon" />
-
-            <TextView
-                android:id="@+id/menu_desktop_label"
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/setting_desktop_mode_title" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/menu_find"
-            style="@style/BrowserMenuQuickAction"
-            android:layout_marginStart="10dp">
-
-            <ImageView
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_search_24"
-                app:tint="@color/browser_icon" />
-
-            <TextView
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/find_in_page" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!--
-      Row 2 — Go backward · Go forward · Print · PDF · New private
-      tab. Backward replaces the spot previously held by the reader
-      mode tile so the row still reads as four equal-weight actions.
-    -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:orientation="horizontal"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp">
-
-        <LinearLayout
-            android:id="@+id/menu_backward"
-            style="@style/BrowserMenuQuickAction">
-
-            <ImageView
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_arrow_back_24"
-                app:tint="@color/browser_icon" />
-
-            <TextView
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/menu_action_go_backward" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/menu_forward"
-            style="@style/BrowserMenuQuickAction"
-            android:layout_marginStart="10dp">
-
-            <ImageView
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_arrow_forward_24"
-                app:tint="@color/browser_icon" />
-
-            <TextView
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/menu_action_go_forward" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/menu_print"
-            style="@style/BrowserMenuQuickAction"
-            android:layout_marginStart="10dp">
-
-            <ImageView
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_print_24"
-                app:tint="@color/browser_icon" />
-
-            <TextView
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/menu_print_pdf" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/menu_private"
-            style="@style/BrowserMenuQuickAction"
-            android:layout_marginStart="10dp">
-
-            <ImageView
-                style="@style/BrowserMenuQuickIcon"
-                android:src="@drawable/ic_private_24"
-                app:tint="@color/browser_icon" />
-
-            <TextView
-                style="@style/BrowserMenuQuickLabel"
-                android:text="@string/new_private_tab" />
-        </LinearLayout>
-    </LinearLayout>
+    </HorizontalScrollView>
 
     <View
         android:layout_width="match_parent"

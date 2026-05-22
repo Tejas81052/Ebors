@@ -65,6 +65,34 @@
         time: ['datetime']
     };
 
+    /** URL-bearing attributes whose scheme we re-check after the
+     *  allowlist pass. Reader content is re-rendered via
+     *  loadDataWithBaseURL under the *original page's origin* but without
+     *  its CSP, so a surviving `javascript:` link would execute scripts
+     *  under that origin on click — something the page's own CSP would
+     *  normally block. */
+    var URL_ATTRS = ['href', 'src', 'srcset', 'poster'];
+
+    /** Schemes that can run script. Never legitimate in any kept
+     *  attribute, so they're dropped wherever they appear. */
+    var SCRIPT_URL_SCHEME = /^(?:javascript|vbscript):/i;
+
+    /**
+     * True if [value] uses a script-capable scheme. Control characters
+     * (<= 0x20) are stripped first because the URL parser ignores
+     * embedded tabs/newlines when resolving the scheme — `java\tscript:`
+     * runs as `javascript:` despite the literal not starting with it.
+     * `data:` is additionally rejected for plain links (`isHref`) where
+     * `data:text/html` is a navigation risk, but kept for media `src`
+     * where inline `data:` images are legitimate.
+     */
+    function hasUnsafeScheme(value, isHref) {
+        if (!value) return false;
+        var normalized = value.replace(/[\u0000-\u0020]+/g, '');
+        if (SCRIPT_URL_SCHEME.test(normalized)) return true;
+        return isHref && /^data:/i.test(normalized);
+    }
+
     function combinedSelector(el) {
         return ((el.className || '') + ' ' + (el.id || '')).toString();
     }
@@ -161,6 +189,9 @@
             for (var k = 0; k < attrs.length; k++) {
                 var name = attrs[k].name.toLowerCase();
                 if (keepers.indexOf(name) === -1) {
+                    e.removeAttribute(attrs[k].name);
+                } else if (URL_ATTRS.indexOf(name) !== -1 &&
+                    hasUnsafeScheme(attrs[k].value, name === 'href')) {
                     e.removeAttribute(attrs[k].name);
                 }
             }

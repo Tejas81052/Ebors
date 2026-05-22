@@ -117,6 +117,27 @@
         <item name="android:paddingBottom">9dp</item>
     </style>
 
+    <!--
+      Fixed-width variant of BrowserMenuQuickAction for the horizontally
+      scrolling quick-action strip. Weight-based sizing collapses to 0 in
+      a HorizontalScrollView (unbounded width), so the tile carries an
+      explicit width instead.
+    -->
+    <style name="BrowserMenuQuickActionScroll">
+        <item name="android:layout_width">78dp</item>
+        <item name="android:layout_height">84dp</item>
+        <item name="android:background">@drawable/bg_menu_quick_action</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+        <item name="android:gravity">center</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:paddingBottom">9dp</item>
+    </style>
+
     <style name="BrowserMenuQuickIcon">
         <item name="android:layout_width">25dp</item>
         <item name="android:layout_height">25dp</item>

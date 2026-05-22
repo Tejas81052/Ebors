@@ -42,6 +42,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service that keeps web audio/video alive while the app is
@@ -63,7 +64,13 @@ class MediaPlaybackService : Service() {
     private var focusRequest: AudioFocusRequest? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val http by lazy { OkHttpClient() }
+    private val http by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
 
     private var title: String = ""
@@ -272,15 +279,39 @@ class MediaPlaybackService : Service() {
     private fun fetchArtwork(url: String) {
         if (url == artworkUrl) return
         artworkUrl = url
-        if (url.isBlank()) {
+        // The artwork URL comes straight from the page's MediaSession
+        // metadata (via the JS bridge), so it's fully attacker-controlled.
+        // Anything that isn't http(s) — file://, data:, or plain garbage —
+        // makes OkHttp's Request.Builder.url() throw IllegalArgumentException,
+        // which would otherwise escape onStartCommand and crash the process.
+        // Treat a non-fetchable URL as "no artwork".
+        if (!url.startsWith("http://", ignoreCase = true) &&
+            !url.startsWith("https://", ignoreCase = true)
+        ) {
             artworkBitmap = null
             return
         }
-        http.newCall(Request.Builder().url(url).build()).enqueue(object : Callback {
+        val request = try {
+            Request.Builder().url(url).build()
+        } catch (_: Exception) {
+            artworkBitmap = null
+            return
+        }
+        http.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {}
 
             override fun onResponse(call: Call, response: Response) {
-                val bytes = response.use { it.body?.bytes() } ?: return
+                // peekBody caps how much we buffer: a hostile server that
+                // streams a multi-GB "image" (especially with no
+                // Content-Length) can't OOM us.
+                val bytes = try {
+                    response.use {
+                        if (!it.isSuccessful) return
+                        it.peekBody(MAX_ARTWORK_BYTES).bytes()
+                    }
+                } catch (_: Exception) {
+                    return
+                }
                 val bitmap = decodeSampled(bytes, MAX_ARTWORK_PX) ?: return
                 mainHandler.post {
                     // Drop stale results if the track changed mid-download.
@@ -346,6 +377,10 @@ class MediaPlaybackService : Service() {
         private const val CHANNEL_ID = "media_playback"
         private const val NOTIFICATION_ID = 6002
         private const val MAX_ARTWORK_PX = 600
+
+        /** Hard cap on a fetched artwork body. Cover art is tens of KB;
+         *  this bounds memory against a hostile/oversized response. */
+        private const val MAX_ARTWORK_BYTES = 8L * 1024L * 1024L
 
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_ARTIST = "artist"

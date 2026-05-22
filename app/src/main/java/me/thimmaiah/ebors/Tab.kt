@@ -135,6 +135,19 @@ class Tab(
     var mediaDocumentStartScript: ScriptHandler? = null
 
     /**
+     * Document-start hook that injects the cosmetic ad-hiding CSS and
+     * anti-adblock stubs before the page renders, so ad slots never flash
+     * into view and detector scripts see the stubs first. Gated on the
+     * ad-block master switch; falls back to an onPageFinished injection on
+     * WebViews without DOCUMENT_START_SCRIPT support. http(s) only.
+     */
+    var cosmeticDocumentStartScript: ScriptHandler? = null
+
+    /** Whether [cosmeticDocumentStartScript] was installed in aggressive
+     *  mode — lets the sync logic re-install when that pref flips. */
+    var cosmeticDocumentStartAggressive: Boolean = false
+
+    /**
      * Downscaled bitmap of the WebView's last visible state, painted
      * inside the tab-switcher card so the user sees real page content
      * instead of skeleton placeholders.
@@ -234,10 +247,12 @@ class Tab(
         runCatching { privacyDocumentStartScript?.remove() }
         runCatching { speechDocumentStartScript?.remove() }
         runCatching { mediaDocumentStartScript?.remove() }
+        runCatching { cosmeticDocumentStartScript?.remove() }
         youTubeDocumentStartScript = null
         privacyDocumentStartScript = null
         speechDocumentStartScript = null
         mediaDocumentStartScript = null
+        cosmeticDocumentStartScript = null
         privacyDocumentStartFlags = DOCUMENT_START_FLAGS_UNSET
     }
 

@@ -818,11 +818,19 @@ $webRtcBlock
     """.trimIndent()
 
     /**
-     * Scriptlet injected on every page load after the DOM is ready. Applies
-     * [cosmeticHidingCss], stubs out common adsbygoogle, runs a YouTube
-     * skip-ad auto-clicker, and neutralises the most common anti-adblock
-     * detection scripts so the page doesn't replace its content with a
-     * "please disable your ad blocker" overlay.
+     * Scriptlet injected at document-start on every page (with an
+     * onPageFinished fallback on WebViews lacking DOCUMENT_START_SCRIPT).
+     * Applies [cosmeticHidingCss], stubs out common adsbygoogle, runs a
+     * YouTube skip-ad auto-clicker, and neutralises the most common
+     * anti-adblock detection scripts so the page doesn't replace its content
+     * with a "please disable your ad blocker" overlay.
+     *
+     * Running at document-start matters: the `<style>` lands before ad
+     * containers paint (no flash), and the detector stubs are defined
+     * before the page's own scripts probe for them. The body only uses
+     * APIs available that early (`document.documentElement`, `setInterval`,
+     * `location`) and inserts its `<style>` into `document.head ||
+     * document.documentElement`, so it is safe before `<head>` exists.
      *
      * @param aggressive when true, additionally monkey-patches
      *   `window.getComputedStyle` so anti-adblock bait elements report
@@ -1053,13 +1061,18 @@ $computedStyleHook
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <title>$title</title>
                 <style>
+                    /* Palette mirrors the app's warm paper/terracotta
+                       theme (values + values-night browser_* tokens) so
+                       the block page matches the browser chrome. Dark is
+                       the default (the app ships dark-on); a light media
+                       override tracks the day palette. */
                     :root { color-scheme: light dark; }
                     * { box-sizing: border-box; }
                     body {
                         margin: 0;
                         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                        background: #0b1020;
-                        color: #e6edf7;
+                        background: #211C16;
+                        color: #F0E8D8;
                         display: flex;
                         align-items: center;
                         justify-content: center;
@@ -1067,17 +1080,17 @@ $computedStyleHook
                         padding: 24px;
                     }
                     @media (prefers-color-scheme: light) {
-                        body { background: #f6f8fc; color: #0b1020; }
-                        .card { background: #ffffff; border-color: #e2e8f0; }
-                        .badge { background: #eef2ff; color: #4338ca; }
-                        .action { background: #4338ca; color: #ffffff; }
-                        .action:active { background: #3730a3; }
+                        body { background: #F6F2EA; color: #2A241D; }
+                        .card { background: #FBF8F1; border-color: #E2DBC8; }
+                        .badge { background: #F2DDD2; color: #C8533A; }
+                        p { color: #574E42; }
+                        .action { background: #C8533A; color: #FDFAF3; }
                     }
                     .card {
                         max-width: 520px;
                         width: 100%;
-                        background: #111a30;
-                        border: 1px solid #1f2a44;
+                        background: #2A241D;
+                        border: 1px solid #3F372D;
                         border-radius: 16px;
                         padding: 28px;
                     }
@@ -1087,8 +1100,8 @@ $computedStyleHook
                         font-weight: 600;
                         letter-spacing: 0.08em;
                         text-transform: uppercase;
-                        background: #1f2a44;
-                        color: #93c5fd;
+                        background: #3F2A22;
+                        color: #E26545;
                         padding: 4px 10px;
                         border-radius: 999px;
                         margin-bottom: 16px;
@@ -1103,15 +1116,15 @@ $computedStyleHook
                         margin: 0;
                         line-height: 1.55;
                         font-size: 15px;
-                        opacity: 0.9;
+                        color: #C8BFA9;
                     }
                     .action {
                         display: inline-block;
                         margin-top: 20px;
                         padding: 11px 20px;
                         border-radius: 999px;
-                        background: #93c5fd;
-                        color: #0b1020;
+                        background: #E26545;
+                        color: #1A140F;
                         text-decoration: none;
                         font-weight: 600;
                         font-size: 14px;
