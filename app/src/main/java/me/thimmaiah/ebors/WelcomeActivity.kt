@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Tejas Thimmaiah
+ * Copyright 2026 Tejas Thimmaiah
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,19 @@ package me.thimmaiah.ebors
 
 import android.app.role.RoleManager
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.ViewFlipper
 import androidx.activity.OnBackPressedCallback
@@ -30,6 +38,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.getSystemService
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
  * First-launch onboarding. Three pages, advanced via a [ViewFlipper]:
@@ -84,9 +95,14 @@ class WelcomeActivity : AppCompatActivity() {
 
         flipper = findViewById(R.id.welcome_flipper)
 
+        // Promise cards (page 2) are populated in code; paint the
+        // initial step dot for page 1.
+        bindPromises()
+        refreshSteps(0)
+
         // Page 1 — Welcome
         findViewById<Button>(R.id.welcome_continue).setOnClickListener {
-            flipper.displayedChild = 1
+            showPage(1)
         }
 
         // Page 2 — Privacy & terms
@@ -110,18 +126,16 @@ class WelcomeActivity : AppCompatActivity() {
             // step is optional. Flip the flag here so the user is
             // never re-prompted even if they kill the app on page 3.
             prefs.onboardingCompleted = true
-            flipper.displayedChild = 2
+            showPage(2)
         }
-        // "Privacy policy" / "Terms of use" links → open external URLs
-        // via a CHOOSER so the user picks which browser opens them.
-        // We deliberately don't load them inside Ebors here — the user
-        // hasn't accepted yet, so Ebors hasn't been initialised as a
-        // browsing surface for them.
+        // "Privacy policy" / "Terms of use" → render the bundled copies in
+        // a local dialog so the user can actually read them before ticking
+        // the consent box, without leaving the onboarding flow.
         findViewById<View>(R.id.welcome_privacy_link).setOnClickListener {
-            openExternalUrl(PRIVACY_POLICY_URL)
+            showLegalDialog("privacy.html")
         }
         findViewById<View>(R.id.welcome_terms_link).setOnClickListener {
-            openExternalUrl(TERMS_OF_USE_URL)
+            showLegalDialog("terms.html")
         }
 
         // Page 3 — Default browser (optional)
@@ -139,7 +153,7 @@ class WelcomeActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (flipper.displayedChild > 0) {
-                    flipper.displayedChild--
+                    showPage(flipper.displayedChild - 1)
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -158,6 +172,50 @@ class WelcomeActivity : AppCompatActivity() {
         }
         versionLabel.text = getString(R.string.welcome_version_label, versionName)
     }
+
+    private fun showPage(index: Int) {
+        flipper.displayedChild = index
+        refreshSteps(index)
+    }
+
+    // Paint the step indicator for the active page. Page 3 uses the
+    // inverse header (cream dots styled statically in XML), so skip it.
+    private fun refreshSteps(activeIndex: Int) {
+        if (activeIndex >= 2) return
+        val page = flipper.getChildAt(activeIndex) ?: return
+        val dotIds = intArrayOf(R.id.welcome_step_1, R.id.welcome_step_2, R.id.welcome_step_3)
+        dotIds.forEachIndexed { idx, dotId ->
+            val dot = page.findViewById<View>(dotId) ?: return@forEachIndexed
+            val active = idx == activeIndex
+            dot.layoutParams = dot.layoutParams.apply { width = dpToPx(if (active) 28 else 14) }
+            dot.setBackgroundResource(
+                if (active) R.drawable.bg_welcome_step_dot_active
+                else R.drawable.bg_welcome_step_dot,
+            )
+        }
+    }
+
+    private fun bindPromises() {
+        val rows = intArrayOf(
+            R.id.welcome_promise_1, R.id.welcome_promise_2,
+            R.id.welcome_promise_3, R.id.welcome_promise_4,
+        )
+        val titles = intArrayOf(
+            R.string.welcome_promise_1_title, R.string.welcome_promise_2_title,
+            R.string.welcome_promise_3_title, R.string.welcome_promise_4_title,
+        )
+        val bodies = intArrayOf(
+            R.string.welcome_promise_1_body, R.string.welcome_promise_2_body,
+            R.string.welcome_promise_3_body, R.string.welcome_promise_4_body,
+        )
+        rows.forEachIndexed { i, rowId ->
+            val row = findViewById<View>(rowId) ?: return@forEachIndexed
+            row.findViewById<TextView>(R.id.welcome_promise_title).setText(titles[i])
+            row.findViewById<TextView>(R.id.welcome_promise_body).setText(bodies[i])
+        }
+    }
+
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 
     private fun requestDefaultBrowserRole() {
         val roleManager = getSystemService<RoleManager>()
@@ -190,6 +248,65 @@ class WelcomeActivity : AppCompatActivity() {
         }
         startActivity(next)
         finish()
+    }
+
+    /**
+     * Show a bundled legal doc (`privacy.html` / `terms.html` in assets) in
+     * a locked-down WebView inside a dialog, so the user can read it without
+     * leaving onboarding. The bundled docs and their in-page anchors stay in
+     * the dialog; mailto/http links are handed off to an external app.
+     */
+    @Suppress("DEPRECATION")
+    private fun showLegalDialog(assetFile: String) {
+        val night = resources.configuration.uiMode and
+            Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+
+        val web = WebView(this).apply {
+            with(settings) {
+                javaScriptEnabled = false
+                domStorageEnabled = false
+                allowFileAccess = false
+                allowContentAccess = false
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            }
+            // Honour the system dark setting so the doc's
+            // prefers-color-scheme: dark CSS branch fires.
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
+            } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_AUTO)
+            }
+            // Match the doc's body colour so a slow load doesn't flash white.
+            setBackgroundColor(if (night) Color.parseColor("#1A1817") else Color.parseColor("#FAF6EE"))
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean {
+                    val url = request.url.toString()
+                    if (url.startsWith("file:///android_asset/")) return false
+                    openExternalUrl(url)
+                    return true
+                }
+            }
+            loadUrl("file:///android_asset/$assetFile")
+        }
+
+        // Cap the WebView height so the dialog reads as a popup over the
+        // onboarding page rather than a full-screen takeover; the doc
+        // scrolls inside it.
+        val height = (resources.displayMetrics.heightPixels * 0.72f).toInt()
+        val container = FrameLayout(this).apply {
+            addView(
+                web,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height),
+            )
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setView(container)
+            .setPositiveButton(R.string.welcome_legal_close, null)
+            .show()
     }
 
     private fun openExternalUrl(url: String) {

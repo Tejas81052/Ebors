@@ -1,6 +1,6 @@
-# Ebors v10 — design handoff
+# Effective Browser v10 — design handoff
 
-This folder bridges the **paper-theme prototype** (`Ebors.html`) back to the Kotlin app. Drop files in, rebuild, no code refactor needed beyond two small `MainActivity.kt` additions.
+This folder bridges the **paper-theme prototype** (`Effective Browser.html`) back to the Kotlin app. Drop files in, rebuild, no code refactor needed beyond two small `MainActivity.kt` additions.
 
 ---
 
@@ -65,6 +65,51 @@ The prototype uses Instrument Serif + Geist + JetBrains Mono. On Android, `fontF
 
 ---
 
-## Verification
+---
 
-The prototype is built at the Android-default `412 × 892` viewport, so the layout should reflow into a real device 1:1. If you build and notice the pill doesn't render its stroke, double-check that `bg_address_pill.xml` lives in `res/drawable/` (not `drawable-anydpi`) — drawables with `<stroke>` need the default density bucket.
+## Welcome flow (`activity_welcome.xml`)
+
+Three-page intro: Welcome / Privacy promise / Default browser. Re-skin only — every existing view ID and string reference is preserved, so `WelcomeActivity.kt` compiles unchanged (one optional patch adds the step indicator + promise binding).
+
+### Drop-ins
+
+| File | Destination | Status |
+|---|---|---|
+| `handoff/res/layout/activity_welcome.xml` | `app/src/main/res/layout/` | **replace** |
+| `handoff/res/layout/welcome_header.xml` | `app/src/main/res/layout/` | **add** |
+| `handoff/res/layout/welcome_header_inverse.xml` | `app/src/main/res/layout/` | **add** |
+| `handoff/res/layout/welcome_promise_row.xml` | `app/src/main/res/layout/` | **add** |
+| `handoff/res/drawable/ill_welcome_paper.xml` | `app/src/main/res/drawable/` | **add** (hero on page 1) |
+| `handoff/res/drawable/ill_welcome_default.xml` | `app/src/main/res/drawable/` | **add** (hero on page 3) |
+| `handoff/res/drawable/ic_welcome_check.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/res/drawable/bg_welcome_*.xml` (×9) | `app/src/main/res/drawable/` | **add** |
+| `handoff/strings.welcome.xml` | merge into `values/strings.xml` | **add 8 new keys** |
+| `handoff/WelcomeActivity.patch.kt` | merge into `WelcomeActivity.kt` | **add 2 routines** |
+
+### What changed visually
+
+1. **Step indicator** (top-right of each page) — 3 dashes; the active one is filled accent and 28dp wide, inactive ones are 14dp neutral.
+2. **Brand line** (top-left) — Ebros logo monogram tile + small mono wordmark on every page.
+3. **Hero illustration on pages 1 & 3** — `ill_welcome_paper` (layered paper sheets with a folded terracotta corner and a bookmark ribbon) and `ill_welcome_default` (a phone with the Ebros launcher icon haloed in dashed accent).
+4. **Page 2 promises** are now four cards with check chips + inline title/body. The old single multiline TextView (`@string/welcome_privacy_bullets`) is no longer referenced — you can delete the key.
+5. **Page 3 finish-line** — solid accent panel across the top (with the wordmark + headline inverted on it), paper bottom with the hero and CTAs. Visually rewards the user for finishing the flow.
+6. **Buttons go pill-shaped** (28dp radius) and gain a small forward arrow drawable.
+
+### Kotlin changes (small)
+
+`WelcomeActivity.patch.kt` adds two helpers:
+- `refreshSteps(activeIndex: Int)` — paints the active dot (wider + accent fill) whenever the ViewFlipper changes child. Call from your existing `showNext()` / `showPrevious()` paths.
+- `bindPromises()` — populates the four promise card titles & bodies on page 2. Call once in `onCreate` after `setContentView`.
+
+Both routines tolerate the include-layout duplication (the header layout is `<include>`d on every page so the same view IDs appear 3×; the helper walks the tree and updates all instances).
+
+### String migration
+
+Keep your existing welcome strings as-is. The patch adds 8 new keys:
+- `welcome_promise_1_title` / `_body` … `welcome_promise_4_title` / `_body`
+
+If you want the suggested copy upgrades (more vibrant tone), `handoff/strings.welcome.xml` also includes `*_new` variants of the existing keys. Either rename them and overwrite, or just copy the text into your existing keys.
+
+### Light/dark
+
+The new drawables reference semantic color tokens (`@color/browser_accent`, `@color/browser_surface`, etc.) which already have night variants in `values-night/colors.xml` — so the new welcome flow respects system dark mode without per-drawable variants.

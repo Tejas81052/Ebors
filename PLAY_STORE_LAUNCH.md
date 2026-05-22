@@ -1,6 +1,6 @@
 # Ebors — Play Store launch checklist
 
-Last updated: 2025. Pre-1.0 release.
+Last updated: 2026. Pre-1.0 release.
 
 This file tracks everything the Google Play Console needs before
 Ebors can ship. Sections are ordered roughly by when you'll hit
@@ -43,7 +43,7 @@ them during the submission flow.
 - Full description (4000 chars max): see `STORE_DESCRIPTION.md` (TODO — write this)
 - Category: **Communication** (browsers go here on Play)
 - Tags: privacy, browser, ad blocker
-- Contact email: hello@thimmaiah.me
+- Contact email: ThimmaiahKK@proton.me
 - Website: https://thimmaiah.me
 
 ### Visual assets (Play required)
@@ -92,6 +92,7 @@ Copy-paste these into the console:
 | `POST_NOTIFICATIONS` | Used to show download progress in the notification shade. The user can deny it. |
 | `REQUEST_INSTALL_PACKAGES` | **Used only when the user explicitly installs an APK they have downloaded through the browser.** Tapping "Install" on a downloaded `.apk` hands the file to Android's package installer. The browser does not install anything without an explicit user tap. |
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC` | Keeps long-running downloads alive while the app is backgrounded. The notification surfaces the in-flight download. |
+| `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Keeps web audio/video playing when the app is backgrounded (e.g. music or a video's soundtrack). The media notification shows playback controls. |
 
 **Heads-up on `REQUEST_INSTALL_PACKAGES`:** Play scrutinises this
 permission heavily — apps with it can be flagged as "high-risk." Be

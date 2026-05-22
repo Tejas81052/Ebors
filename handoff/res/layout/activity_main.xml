@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Ebors v10 — paper theme rebuild of activity_main.xml.
+  Effective Browser v10 — paper theme rebuild of activity_main.xml.
 
   ALL existing IDs and child ordering are preserved. MainActivity.kt
   does not need any code changes to compile against this file; the

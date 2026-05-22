@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Tejas Thimmaiah
+ * Copyright 2026 Tejas Thimmaiah
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -128,6 +128,13 @@ class Tab(
     var speechDocumentStartScript: ScriptHandler? = null
 
     /**
+     * Document-start hook that masks the Page Visibility API and reports
+     * `<video>`/`<audio>` play state to the app so media can keep playing
+     * (with lock-screen controls) while the app is backgrounded. http(s) only.
+     */
+    var mediaDocumentStartScript: ScriptHandler? = null
+
+    /**
      * Downscaled bitmap of the WebView's last visible state, painted
      * inside the tab-switcher card so the user sees real page content
      * instead of skeleton placeholders.
@@ -226,9 +233,11 @@ class Tab(
         runCatching { youTubeDocumentStartScript?.remove() }
         runCatching { privacyDocumentStartScript?.remove() }
         runCatching { speechDocumentStartScript?.remove() }
+        runCatching { mediaDocumentStartScript?.remove() }
         youTubeDocumentStartScript = null
         privacyDocumentStartScript = null
         speechDocumentStartScript = null
+        mediaDocumentStartScript = null
         privacyDocumentStartFlags = DOCUMENT_START_FLAGS_UNSET
     }
 

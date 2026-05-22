@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Tejas Thimmaiah
+ * Copyright 2026 Tejas Thimmaiah
  *
  * All rights reserved. This source file is part of Ebors.
  *

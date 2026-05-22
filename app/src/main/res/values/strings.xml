@@ -112,6 +112,14 @@
     <string name="download_notification_idle">Preparing downloads</string>
     <string name="download_notification_permission_denied">Allow notifications to keep download progress visible.</string>
 
+    <string name="media_notification_channel">Media playback</string>
+    <string name="media_play">Play</string>
+    <string name="media_pause">Pause</string>
+    <string name="media_previous">Previous</string>
+    <string name="media_next">Next</string>
+
+    <string name="press_back_again_to_exit">Press back again to exit</string>
+
     <string name="settings_title">Settings</string>
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_search">Search</string>
@@ -221,7 +229,7 @@
     <string name="setting_clear_browsing_data_summary">Cookies, cache, history and form data.</string>
     <string name="about_app_title">Ebors</string>
     <string name="about_version_label">Version %1$s</string>
-    <string name="about_copyright">© 2025 Tejas Thimmaiah. Licensed under the Apache License, Version 2.0.</string>
+    <string name="about_copyright">© 2026 Tejas Thimmaiah. Licensed under the Apache License, Version 2.0.</string>
     <string name="about_engine">Rendering engine: Android System WebView (Chromium-based).</string>
     <string name="about_known_limitation">Voice input (the Web Speech API used by mic buttons on sites like Google) is provided through your device\'s built-in speech recognition. It needs a speech-recognition service installed (most devices have one) and microphone permission. Accuracy and language support come from that service.</string>
     <string name="setting_open_source_licenses_title">Open-source licenses</string>
@@ -240,6 +248,7 @@
     <string name="welcome_continue">Continue</string>
     <string name="welcome_version_label">Version %1$s</string>
     <string name="welcome_open_with">Open with</string>
+    <string name="welcome_legal_close">Close</string>
 
     <string name="welcome_privacy_eyebrow">Privacy promise</string>
     <string name="welcome_privacy_title">What Ebors does &amp; doesn\'t do</string>
@@ -254,6 +263,16 @@
     <string name="welcome_default_body">Optional. If you set Ebors as the default, links from other apps open here. You can change this any time in Android Settings.</string>
     <string name="welcome_set_default">Set as default</string>
     <string name="welcome_skip">Not now</string>
+
+    <!-- Privacy promise cards (page 2) -->
+    <string name="welcome_promise_1_title">History stays here</string>
+    <string name="welcome_promise_1_body">We don\'t sync, upload, or share your browsing.</string>
+    <string name="welcome_promise_2_title">Trackers blocked</string>
+    <string name="welcome_promise_2_body">A curated list filters known ad networks and pixels.</string>
+    <string name="welcome_promise_3_title">No account, ever</string>
+    <string name="welcome_promise_3_body">Bookmarks and settings live on this device.</string>
+    <string name="welcome_promise_4_title">Open by default</string>
+    <string name="welcome_promise_4_body">Source available. You can read what we do.</string>
 
     <string name="file_chooser_title">Choose file</string>
     <string name="file_chooser_unavailable">No app available to pick a file.</string>

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Tejas Thimmaiah
+ * Copyright 2026 Tejas Thimmaiah
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -110,6 +110,9 @@ class MainActivity : AppCompatActivity() {
     // dismissing the keyboard doesn't also exit the app/close a tab.
     private var swallowBackNav = false
     private val clearSwallowBackNav = Runnable { swallowBackNav = false }
+
+    private var backToExitArmed = false
+    private val clearBackToExit = Runnable { backToExitArmed = false }
     private lateinit var captionView: TextView
     private lateinit var securityIndicator: ImageView
     private lateinit var webContainer: androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -172,6 +175,14 @@ class MainActivity : AppCompatActivity() {
     private var inFlightPermissionDialog: android.app.Dialog? = null
 
     private var skipWebViewPauseForPermission = false
+
+    /** Tab whose web media is currently driving the background-playback
+     *  service, or null when nothing is playing. */
+    private var mediaPlayingTab: Tab? = null
+
+    /** True while web media is actively playing; gates the
+     *  keep-WebView-alive path in [onPause] so audio survives backgrounding. */
+    private var backgroundMediaPlaying = false
 
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
@@ -366,6 +377,16 @@ class MainActivity : AppCompatActivity() {
         }
         applyPreferences()
 
+        MediaPlaybackService.transportCallback = object : MediaPlaybackService.Transport {
+            override fun onPlay() = runOnUiThread { mediaAction("play") }
+            override fun onPause() = runOnUiThread { mediaAction("pause") }
+            override fun onStop() = runOnUiThread { mediaAction("pause") }
+            override fun onNext() = runOnUiThread { mediaAction("nexttrack") }
+            override fun onPrevious() = runOnUiThread { mediaAction("previoustrack") }
+            override fun onSeekTo(positionMs: Long) =
+                runOnUiThread { mediaAction("seekto", positionMs / 1000.0) }
+        }
+
         maybeShowDefaultBrowserPrompt()
         maybeRequestNotificationPermission()
     }
@@ -423,8 +444,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
 
-        if (!skipWebViewPauseForPermission) {
-
+        // While audio is playing we deliberately keep every WebView (and JS
+        // timers) alive so playback continues in the background; the page
+        // masked its own visibility when playback started so it won't
+        // auto-pause. skipWebViewPauseForPermission covers the runtime
+        // permission round-trip.
+        if (!backgroundMediaPlaying && !skipWebViewPauseForPermission) {
             if (tabs.isNotEmpty()) tabs[0].webView.pauseTimers()
             for (tab in tabs) tab.webView.onPause()
         }
@@ -450,6 +475,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         exitFullscreen()
+        // Tabs are torn down below, so any web media is gone — release the
+        // session/notification and stop masking transport actions.
+        MediaPlaybackService.transportCallback = null
+        stopBackgroundMedia()
         permissionInFlightTabId = null
         geolocationInFlightTabId = null
         inFlightPermissionDialog = null
@@ -604,6 +633,8 @@ class MainActivity : AppCompatActivity() {
         val tab = tabs.getOrNull(index) ?: return
         val wasActive = index == activeTabIndex
         val wasPrivate = tab.isPrivate
+
+        if (tab === mediaPlayingTab) stopBackgroundMedia()
 
         if (wasActive) {
             webHost.removeView(tab.webView)
@@ -1147,6 +1178,67 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private inner class BackgroundMediaBridge(private val tab: Tab) {
+        @JavascriptInterface
+        fun onState(
+            playing: Boolean,
+            title: String?,
+            artist: String?,
+            artwork: String?,
+            durationSec: Double,
+            positionSec: Double,
+        ) {
+            runOnUiThread {
+                if (playing) {
+                    // Only the active (attached) tab can be playing; ignore
+                    // late events from a tab the user already switched away
+                    // from (its WebView was paused on switch).
+                    if (tab !== activeTabOrNull) return@runOnUiThread
+                    mediaPlayingTab = tab
+                    backgroundMediaPlaying = true
+                    tab.webView.keepAliveWhenHidden = true
+                } else if (tab === mediaPlayingTab) {
+                    backgroundMediaPlaying = false
+                } else {
+                    return@runOnUiThread
+                }
+                MediaPlaybackService.update(
+                    this@MainActivity,
+                    title.orEmpty(),
+                    artist.orEmpty(),
+                    artwork.orEmpty(),
+                    (durationSec * 1000).toLong().coerceAtLeast(0),
+                    (positionSec * 1000).toLong().coerceAtLeast(0),
+                    playing,
+                )
+            }
+        }
+
+        @JavascriptInterface
+        fun onStopped() {
+            runOnUiThread {
+                if (tab === mediaPlayingTab) stopBackgroundMedia()
+            }
+        }
+    }
+
+    private fun stopBackgroundMedia() {
+        backgroundMediaPlaying = false
+        mediaPlayingTab?.webView?.keepAliveWhenHidden = false
+        mediaPlayingTab = null
+        MediaPlaybackService.stop(this)
+    }
+
+    private fun mediaAction(action: String, arg: Double? = null) {
+        val tab = mediaPlayingTab ?: activeTabOrNull ?: return
+        val js = if (arg != null) {
+            "window.__eborsMediaAction && window.__eborsMediaAction('$action', $arg)"
+        } else {
+            "window.__eborsMediaAction && window.__eborsMediaAction('$action')"
+        }
+        tab.webView.evaluateJavascript(js, null)
+    }
+
     private var speechRecognizer: android.speech.SpeechRecognizer? = null
     private var speechActive = false
     private var speechContinuous = false
@@ -1410,6 +1502,11 @@ class MainActivity : AppCompatActivity() {
             SPEECH_BRIDGE_NAME,
         )
 
+        target.addJavascriptInterface(
+            BackgroundMediaBridge(tab),
+            MEDIA_BRIDGE_NAME,
+        )
+
         target.setOnCreateContextMenuListener { menu, _, _ ->
             val result = target.hitTestResult
             val url = result.extra
@@ -1639,6 +1736,11 @@ class MainActivity : AppCompatActivity() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
 
+                // A full navigation in the tab that was driving background
+                // audio means the old media element is gone; clear the
+                // session so we don't show stale controls.
+                if (tab === mediaPlayingTab) stopBackgroundMedia()
+
                 if (tab.displayUrl == ABOUT_HOME_URL &&
                     !url.isNullOrBlank() &&
                     url != ABOUT_HOME_URL &&
@@ -1791,6 +1893,14 @@ class MainActivity : AppCompatActivity() {
             tab.speechDocumentStartScript = addDocumentStartScript(
                 tab.webView,
                 SPEECH_POLYFILL_SCRIPT,
+                setOf("https://*", "http://*"),
+            )
+        }
+
+        if (tab.mediaDocumentStartScript == null) {
+            tab.mediaDocumentStartScript = addDocumentStartScript(
+                tab.webView,
+                MEDIA_BACKGROUND_SCRIPT,
                 setOf("https://*", "http://*"),
             )
         }
@@ -2013,6 +2123,12 @@ class MainActivity : AppCompatActivity() {
 
         view.evaluateJavascript(REFRESH_GUARD_SCRIPT, null)
 
+        // Reliable install point for the background-media shim: the JS
+        // interface is guaranteed present here, and this also covers
+        // WebView builds without DOCUMENT_START_SCRIPT. The shim is
+        // idempotent (guards on window.__eborsMediaInit).
+        view.evaluateJavascript(MEDIA_BACKGROUND_SCRIPT, null)
+
         if (url != null && isYouTubeHost(url)) {
             view.evaluateJavascript(YOUTUBE_SHORTS_LAYOUT_SCRIPT, null)
         }
@@ -2063,15 +2179,28 @@ class MainActivity : AppCompatActivity() {
                 val tab = activeTabOrNull
                 if (tab != null && tab.webView.canGoBack()) {
                     tab.webView.goBack()
+                    backToExitArmed = false
                     updateNavigationButtons()
                     return
                 }
-                if (tabs.size > 1) {
-
-                    closeTab(activeTabIndex)
+                // No page history left in this tab. Each tab is an
+                // independent entity: BACK never cascades into closing
+                // other tabs. Step the tab to its home page, then require
+                // a confirmed double-press to exit the app.
+                if (tab != null && tab.displayUrl != ABOUT_HOME_URL) {
+                    loadAddress(ABOUT_HOME_URL)
+                    backToExitArmed = false
                     return
                 }
-                finish()
+                if (backToExitArmed) {
+                    rootView.removeCallbacks(clearBackToExit)
+                    finish()
+                    return
+                }
+                backToExitArmed = true
+                showToast(getString(R.string.press_back_again_to_exit))
+                rootView.removeCallbacks(clearBackToExit)
+                rootView.postDelayed(clearBackToExit, BACK_TO_EXIT_WINDOW_MS)
             }
         })
     }
@@ -3210,6 +3339,10 @@ class MainActivity : AppCompatActivity() {
         // second press.
         private const val BACK_NAV_SWALLOW_WINDOW_MS = 150L
 
+        // Window after the first "exit" BACK press during which a second
+        // press actually finishes the app (classic press-back-again-to-exit).
+        private const val BACK_TO_EXIT_WINDOW_MS = 2000L
+
         private const val STATE_TAB_URLS = "state_tab_urls"
         private const val STATE_ACTIVE_TAB_INDEX = "state_active_tab_index"
         private const val STATE_ACTIVE_TAB_WEBVIEW = "state_active_tab_webview"
@@ -3252,6 +3385,189 @@ class MainActivity : AppCompatActivity() {
         private const val SHORTS_LAYOUT_BRIDGE_NAME = "__eborsShortsLayout"
 
         private const val SPEECH_BRIDGE_NAME = "__eborsSpeechBridge"
+
+        private const val MEDIA_BRIDGE_NAME = "__eborsMediaBridge"
+
+        // Injected at document start (and again on page-finished) for
+        // http(s). Three jobs:
+        //  1. While audio plays (keep==true) mask the Page Visibility API and
+        //     swallow visibility/pagehide events so the page doesn't auto-pause.
+        //  2. Report <video>/<audio> state + the page's MediaSession metadata
+        //     (title/artist/artwork) and duration/position to the app so it can
+        //     render a full media notification.
+        //  3. Capture the page's own navigator.mediaSession action handlers
+        //     (play/pause/nexttrack/previoustrack/seekto) so the notification's
+        //     transport buttons drive the site generically — no per-site hacks.
+        private const val MEDIA_BACKGROUND_SCRIPT = """
+            (function() {
+                try {
+                    if (window.__eborsMediaInit) return;
+                    window.__eborsMediaInit = true;
+                    var bridge = window.$MEDIA_BRIDGE_NAME;
+                    var keep = false;
+                    var current = null;
+                    var playingNow = false;
+                    var durationSec = 0;
+                    var positionSec = 0;
+                    var handlers = {};
+
+                    function defineVis(proto, prop, masked) {
+                        var real = Object.getOwnPropertyDescriptor(proto, prop);
+                        try {
+                            Object.defineProperty(proto, prop, {
+                                configurable: true,
+                                get: function() {
+                                    if (keep) return masked;
+                                    return real && real.get ? real.get.call(this) : masked;
+                                }
+                            });
+                        } catch (e) {}
+                    }
+                    defineVis(Document.prototype, 'hidden', false);
+                    defineVis(Document.prototype, 'visibilityState', 'visible');
+
+                    function guard(e) { if (keep) { e.stopImmediatePropagation(); } }
+                    window.addEventListener('visibilitychange', guard, true);
+                    document.addEventListener('visibilitychange', guard, true);
+                    window.addEventListener('webkitvisibilitychange', guard, true);
+                    window.addEventListener('pagehide', guard, true);
+                    window.addEventListener('blur', guard, true);
+
+                    function pickArt(arr) {
+                        try {
+                            if (!arr || !arr.length) return '';
+                            var best = arr[0], bestArea = -1;
+                            for (var i = 0; i < arr.length; i++) {
+                                var sz = (arr[i].sizes || '').split('x');
+                                var area = (parseInt(sz[0], 10) || 0) * (parseInt(sz[1], 10) || 0);
+                                if (area >= bestArea) { bestArea = area; best = arr[i]; }
+                            }
+                            return best.src || '';
+                        } catch (e) { return ''; }
+                    }
+                    function ytThumb() {
+                        try {
+                            var m = location.href.match(/[?&]v=([\w-]{11})/) ||
+                                location.href.match(/\/shorts\/([\w-]{11})/);
+                            if (m) return 'https://i.ytimg.com/vi/' + m[1] + '/hqdefault.jpg';
+                        } catch (e) {}
+                        return '';
+                    }
+                    function meta() {
+                        var title = '', artist = '', artwork = '';
+                        try {
+                            var m = navigator.mediaSession && navigator.mediaSession.metadata;
+                            if (m && m.title) { title = m.title; artist = m.artist || ''; artwork = pickArt(m.artwork); }
+                        } catch (e) {}
+                        if (!title) title = (document.title || '').replace(/\s*-\s*YouTube$/, '');
+                        if (!artwork) artwork = ytThumb();
+                        return { title: title, artist: artist, artwork: artwork };
+                    }
+                    function isMedia(t) {
+                        return t && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO');
+                    }
+                    function report(playing) {
+                        try {
+                            if (!bridge) return;
+                            var info = meta();
+                            bridge.onState(playing, info.title, info.artist, info.artwork, durationSec || 0, positionSec || 0);
+                        } catch (e) {}
+                    }
+                    // The JS owns the keep-alive flag: flip it the instant
+                    // media starts/stops so visibility is already masked by
+                    // the time the app is backgrounded (no async race with
+                    // onPause). 'play'/'pause'/'ended' don't bubble, so we
+                    // capture them at the document.
+                    document.addEventListener('play', function(e) {
+                        if (isMedia(e.target)) {
+                            current = e.target;
+                            keep = true;
+                            playingNow = true;
+                            if (e.target.duration && isFinite(e.target.duration)) durationSec = e.target.duration;
+                            report(true);
+                        }
+                    }, true);
+                    document.addEventListener('pause', function(e) {
+                        if (isMedia(e.target)) {
+                            keep = false;
+                            playingNow = false;
+                            if (e.target.currentTime) positionSec = e.target.currentTime;
+                            report(false);
+                        }
+                    }, true);
+                    document.addEventListener('ended', function(e) {
+                        if (isMedia(e.target)) {
+                            keep = false;
+                            playingNow = false;
+                            try { if (bridge) bridge.onStopped(); } catch (x) {}
+                        }
+                    }, true);
+
+                    // Capture the page's own MediaSession action handlers so
+                    // the notification's prev/next/seek invoke them generically.
+                    try {
+                        var ms = navigator.mediaSession;
+                        if (ms && typeof ms.setActionHandler === 'function') {
+                            var origSet = ms.setActionHandler.bind(ms);
+                            ms.setActionHandler = function(action, handler) {
+                                handlers[action] = handler;
+                                try { origSet(action, handler); } catch (e) {}
+                            };
+                        }
+                    } catch (e) {}
+
+                    // SPA sites (YouTube) swap tracks without firing a fresh
+                    // 'play', and populate their MediaSession metadata slightly
+                    // after playback starts. Poll once a second: read live
+                    // duration/position from the element and title/artist/art
+                    // from the page, pushing an update only when something
+                    // changed so we don't rebuild the notification every tick.
+                    var lastSig = '';
+                    setInterval(function() {
+                        try {
+                            if (!current) return;
+                            if (current.duration && isFinite(current.duration)) durationSec = current.duration;
+                            if (typeof current.currentTime === 'number') positionSec = current.currentTime;
+                            playingNow = !current.paused;
+                            var info = meta();
+                            var sig = info.title + '|' + info.artist + '|' + info.artwork +
+                                '|' + Math.round(durationSec) + '|' + (playingNow ? 1 : 0);
+                            if (sig !== lastSig) {
+                                lastSig = sig;
+                                report(playingNow);
+                            }
+                        } catch (e) {}
+                    }, 1000);
+
+                    // Reflect in-page scrubbing onto the notification seek bar.
+                    document.addEventListener('seeked', function(e) {
+                        if (isMedia(e.target)) {
+                            positionSec = e.target.currentTime || 0;
+                            report(playingNow);
+                        }
+                    }, true);
+
+                    window.__eborsSetKeepAwake = function(v) { keep = !!v; };
+                    window.__eborsMediaAction = function(action, arg) {
+                        try {
+                            var h = handlers[action];
+                            if (h) {
+                                var details = { action: action };
+                                if (action === 'seekto') details.seekTime = arg;
+                                h(details);
+                                return;
+                            }
+                            var el = current;
+                            if (!el || !el.parentNode) { el = document.querySelector('video, audio'); }
+                            if (!el) return;
+                            if (action === 'play') el.play();
+                            else if (action === 'pause') el.pause();
+                            else if (action === 'seekto' && typeof arg === 'number') el.currentTime = arg;
+                        } catch (e) {}
+                    };
+                } catch (e) {}
+            })();
+        """
 
         private const val SPEECH_POLYFILL_SCRIPT = """
             (function() {

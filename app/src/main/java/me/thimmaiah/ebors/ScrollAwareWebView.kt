@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Tejas Thimmaiah
+ * Copyright 2026 Tejas Thimmaiah
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package me.thimmaiah.ebors
 
 import android.content.Context
 import android.util.AttributeSet
+import android.view.View
 import android.webkit.WebView
 
 /**
@@ -57,8 +58,31 @@ class ScrollAwareWebView @JvmOverloads constructor(
      */
     var onScrollChangedListener: ((scrollY: Int, deltaY: Int) -> Unit)? = null
 
+    /**
+     * When true, the WebView reports itself as window-visible to the
+     * underlying Chromium engine even after the host activity is
+     * backgrounded. This is what actually keeps audio/video decoding in
+     * the background: Chromium suspends media when the WebView's *window*
+     * becomes invisible, and that suspension is independent of (and
+     * happens regardless of) the JavaScript Page Visibility API. The JS
+     * visibility mask in MainActivity only stops the *page* from pausing
+     * itself; this stops the *engine* from pausing the media.
+     *
+     * Set by MainActivity while web audio is playing and cleared when it
+     * stops, so normal backgrounding still suspends an idle WebView.
+     */
+    var keepAliveWhenHidden = false
+
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
         onScrollChangedListener?.invoke(t, t - oldt)
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        if (keepAliveWhenHidden && visibility != View.VISIBLE) {
+            super.onWindowVisibilityChanged(View.VISIBLE)
+        } else {
+            super.onWindowVisibilityChanged(visibility)
+        }
     }
 }
