@@ -100,9 +100,16 @@ import com.google.android.material.snackbar.Snackbar
 
 class MainActivity : AppCompatActivity() {
     private lateinit var rootView: View
-    private lateinit var addressBar: EditText
+    private lateinit var addressBar: AddressEditText
     private lateinit var addressSuggestionAdapter: AddressSuggestionAdapter
     private var addressSuggestionPopup: ListPopupWindow? = null
+    private var imeWasVisible = false
+    // Set right after the keyboard hides while editing an address bar.
+    // Predictive-back devices deliver BACK to the dispatcher in addition
+    // to hiding the keyboard; this swallows that one stray navigation so
+    // dismissing the keyboard doesn't also exit the app/close a tab.
+    private var swallowBackNav = false
+    private val clearSwallowBackNav = Runnable { swallowBackNav = false }
     private lateinit var captionView: TextView
     private lateinit var securityIndicator: ImageView
     private lateinit var webContainer: androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -685,7 +692,7 @@ class MainActivity : AppCompatActivity() {
 
             val text = query.trim()
             if (text.isEmpty()) return
-            hideKeyboard(addressBar)
+            hideImeForcefully()
             loadAddress(resolveUserInput(text))
         }
 
@@ -706,7 +713,7 @@ class MainActivity : AppCompatActivity() {
         override fun onStartPageQuerySubmitted(query: String) {
             val text = query.trim()
             if (text.isEmpty()) return
-            hideKeyboard(addressBar)
+            hideImeForcefully()
             loadAddress(resolveUserInput(text))
         }
     }
@@ -806,10 +813,55 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            // Close the address-bar autocomplete when the keyboard hides
+            // (gesture/3-button back), which the IME swallows before it
+            // reaches the EditText. The IME inset transition is the one
+            // signal that fires across all navigation modes.
+            val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            if (imeWasVisible && !imeVisible) onKeyboardHidden()
+            imeWasVisible = imeVisible
             insets
         }
 
         ViewCompat.requestApplyInsets(rootView)
+    }
+
+    private fun onKeyboardHidden() {
+        val wasEditing = isAddressEditing()
+        dismissAddressSuggestions()
+        if (addressBar.hasFocus()) addressBar.clearFocus()
+        startPageView?.onKeyboardHidden()
+        privateStartPageView?.onKeyboardHidden()
+        // If we were editing, a predictive-back press may also fire the
+        // back dispatcher right after this. Arm a brief swallow so that
+        // stray back doesn't navigate/exit. The window is short enough
+        // that a deliberate second press still navigates.
+        if (wasEditing) {
+            swallowBackNav = true
+            rootView.removeCallbacks(clearSwallowBackNav)
+            rootView.postDelayed(clearSwallowBackNav, BACK_NAV_SWALLOW_WINDOW_MS)
+        }
+    }
+
+    private fun isAddressEditing(): Boolean =
+        addressBar.hasFocus() ||
+            addressSuggestionPopup?.isShowing == true ||
+            startPageView?.isEditing() == true ||
+            privateStartPageView?.isEditing() == true
+
+    private fun cancelAddressEditing() {
+        dismissAddressSuggestions()
+        addressBar.clearFocus()
+        hideImeForcefully()
+        startPageView?.onKeyboardHidden()
+        privateStartPageView?.onKeyboardHidden()
+    }
+
+    /** Hide the soft keyboard at the window level, independent of which
+     *  view holds focus. More reliable than hideSoftInputFromWindow when
+     *  focus may move between the top bar and a home-page search field. */
+    private fun hideImeForcefully() {
+        WindowInsetsControllerCompat(window, rootView).hide(WindowInsetsCompat.Type.ime())
     }
 
     private fun configureNavigation() {
@@ -898,6 +950,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun configureAddressSuggestions() {
         addressSuggestionAdapter = AddressSuggestionAdapter(this)
+        // Dismiss the dropdown on BACK (older devices). Focus + keyboard +
+        // navigation are handled by the IME-inset listener / back
+        // dispatcher so we don't race them.
+        addressBar.onBackPreIme = { dismissAddressSuggestions() }
         addressSuggestionPopup = ListPopupWindow(this).apply {
             setAdapter(addressSuggestionAdapter)
             setBackgroundDrawable(ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_address_suggestions))
@@ -1977,6 +2033,21 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
 
+                // Address-bar editing (top bar or either home-page
+                // search): cancel it rather than navigating. Catches the
+                // case where the dispatcher fires while focus is still on
+                // the field.
+                if (isAddressEditing()) {
+                    cancelAddressEditing()
+                    return
+                }
+                // The keyboard just hid from an edit and this BACK rode
+                // along with it — swallow it so we don't also exit.
+                if (swallowBackNav) {
+                    swallowBackNav = false
+                    rootView.removeCallbacks(clearSwallowBackNav)
+                    return
+                }
                 if (tabSwitcherView?.isShowing() == true) {
                     tabSwitcherView?.dismiss()
                     return
@@ -3132,6 +3203,12 @@ class MainActivity : AppCompatActivity() {
         private const val FIND_DEBOUNCE_MS = 150L
         private const val ADDRESS_SUGGESTION_LIMIT = 8
         private const val ADDRESS_SUGGESTION_DISMISS_DELAY_MS = 120L
+
+        // Brief window after a keyboard-hide during editing in which a
+        // predictive-back navigation is swallowed. Long enough to catch
+        // the same back event, short enough not to eat a deliberate
+        // second press.
+        private const val BACK_NAV_SWALLOW_WINDOW_MS = 150L
 
         private const val STATE_TAB_URLS = "state_tab_urls"
         private const val STATE_ACTIVE_TAB_INDEX = "state_active_tab_index"

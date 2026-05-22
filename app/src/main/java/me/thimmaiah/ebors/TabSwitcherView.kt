@@ -362,8 +362,8 @@ class TabSwitcherView(
                 //
                 // Three thumbnail states (exactly one painted):
                 //   • Live screenshot (regular tab, captureThumbnail
-                //     has run) → tab_thumbnail_image visible, matrix
-                //     anchored top-left so the page top is what shows
+                //     has run) → tab_thumbnail_image visible, centre-
+                //     cropped into the square so the page middle shows
                 //   • Skeleton bars (regular tab, never captured) →
                 //     tab_skeleton_group visible (boot / first-load
                 //     placeholder)
@@ -394,7 +394,6 @@ class TabSwitcherView(
                         skeletonGroup.isVisible = false
                         thumbnailImage.isVisible = true
                         thumbnailImage.setImageBitmap(liveBitmap)
-                        applyFitWidthTopMatrix(thumbnailImage, liveBitmap)
                     } else {
                         thumbnailImage.setImageDrawable(null)
                         thumbnailImage.isVisible = false
@@ -426,45 +425,6 @@ class TabSwitcherView(
 
                 root.setOnClickListener { onCardClicked(snapshot.id) }
                 closeButton.setOnClickListener { onCloseClicked(snapshot.id) }
-            }
-
-            /**
-             * Scale the thumbnail bitmap to fill the ImageView's width,
-             * anchored top-left, with bottom overflow clipped. This is
-             * the Brave-style "show the top of the page" framing — a
-             * plain centerCrop would scale to fill height too and
-             * crop a horizontal strip from the middle, which on a
-             * tall WebView screenshot misses the article header / nav.
-             *
-             * The first bind after `notifyDataSetChanged` can fire
-             * before the RecyclerView has laid the view out (width =
-             * 0), so we fall back to a one-shot OnPreDrawListener that
-             * applies the matrix as soon as the width is known, then
-             * removes itself.
-             */
-            private fun applyFitWidthTopMatrix(image: ImageView, bitmap: android.graphics.Bitmap) {
-                fun apply(): Boolean {
-                    val viewW = image.width
-                    val bmW = bitmap.width
-                    if (viewW <= 0 || bmW <= 0) return false
-                    val scale = viewW.toFloat() / bmW.toFloat()
-                    val matrix = android.graphics.Matrix()
-                    matrix.setScale(scale, scale)
-                    image.imageMatrix = matrix
-                    return true
-                }
-                if (!apply()) {
-                    image.viewTreeObserver.addOnPreDrawListener(
-                        object : android.view.ViewTreeObserver.OnPreDrawListener {
-                            override fun onPreDraw(): Boolean {
-                                if (apply()) {
-                                    image.viewTreeObserver.removeOnPreDrawListener(this)
-                                }
-                                return true
-                            }
-                        },
-                    )
-                }
             }
 
             private fun extractHost(url: String): String {

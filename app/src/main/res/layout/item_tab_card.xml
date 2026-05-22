@@ -91,29 +91,22 @@
              glyph (private tab). Exactly one of the three child
              groups is visible at any given time; TabSwitcherView
              picks via setVisibility in bind(). -->
-        <FrameLayout
+        <me.thimmaiah.ebors.SquareFrameLayout
             android:id="@+id/tab_thumbnail"
             android:layout_width="match_parent"
-            android:layout_height="130dp"
+            android:layout_height="wrap_content"
             android:background="@drawable/bg_tab_thumbnail"
             android:clipChildren="true"
             android:clipToOutline="true">
 
-            <!--
-              v10.1: live WebView screenshot, painted ahead of the
-              skeleton / private placeholders. centerCrop fills the
-              card body the same way Brave's tab cards do — the
-              top-left of the page is anchored and excess height is
-              trimmed off the bottom (which is where chrome / overlay
-              UI tends to live, so the trim usually shaves visual
-              noise rather than the article).
-            -->
+            <!-- Live WebView screenshot, centre-cropped to fill the
+                 square so the middle of the page is what shows. -->
             <ImageView
                 android:id="@+id/tab_thumbnail_image"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:importantForAccessibility="no"
-                android:scaleType="matrix"
+                android:scaleType="centerCrop"
                 android:visibility="gone" />
 
             <!-- Skeleton placeholder for regular tabs -->
@@ -181,7 +174,7 @@
                     android:textColor="@color/tab_private_hint"
                     android:textSize="10sp" />
             </LinearLayout>
-        </FrameLayout>
+        </me.thimmaiah.ebors.SquareFrameLayout>
 
         <!-- Footer: monospace hostname -->
         <TextView

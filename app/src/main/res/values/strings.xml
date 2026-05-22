@@ -122,7 +122,7 @@
     <string name="setting_desktop_mode_title">Desktop site</string>
     <string name="setting_desktop_mode_summary">Use a desktop user agent and viewport.</string>
     <string name="setting_force_dark_title">Dark mode</string>
-    <string name="setting_force_dark_summary">Apply a dark theme to web pages that don\'t provide one. On by default.</string>
+    <string name="setting_force_dark_summary">Use a dark theme across the app and web pages. On by default; turn off for a light theme.</string>
     <string name="setting_search_engine_title">Default search engine</string>
     <string name="setting_ad_block_title">Block ads &amp; trackers</string>
     <string name="setting_ad_block_summary">Filter known ad networks and tracking pixels.</string>

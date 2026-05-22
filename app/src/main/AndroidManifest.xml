@@ -47,6 +47,7 @@
     <uses-feature android:name="android.hardware.location.network" android:required="false" />
 
     <application
+        android:name=".EborsApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

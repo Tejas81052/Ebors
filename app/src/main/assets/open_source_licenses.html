@@ -9,11 +9,6 @@
   body { font: 14px/1.5 -apple-system, system-ui, sans-serif;
          padding: 16px 18px 32px; max-width: 720px;
          color: #232323; background: #faf6ee; }
-  @media (prefers-color-scheme: dark) {
-    body { background: #1a1817; color: #e8e3d8; }
-    a { color: #f0a079; }
-    pre { background: #232020; }
-  }
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 22px 0 6px; }
   p { margin: 0 0 12px; }
@@ -25,6 +20,14 @@
         border-radius: 6px; }
   hr { border: 0; border-top: 1px solid #00000022; margin: 18px 0; }
   .muted { opacity: 0.7; font-size: 12.5px; }
+  /* Dark rules last so they win over the light base rules above
+     (equal specificity → later source order wins). */
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1817; color: #e8e3d8; }
+    a { color: #f0a079; }
+    pre { background: #232020; color: #e8e3d8; }
+    hr { border-top-color: #ffffff22; }
+  }
 </style>
 </head>
 <body>

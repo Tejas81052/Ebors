@@ -73,10 +73,10 @@ class OpenSourceLicensesActivity : AppCompatActivity() {
         // older WebView builds and is harmless on newer ones.
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(web.settings, true)
-        }
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-            // FORCE_DARK_AUTO matches the activity's day/night state
-            // without overriding the page's own CSS where it cares.
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            // Fallback for older WebView builds without algorithmic
+            // darkening. FORCE_DARK_AUTO matches the activity's day/night
+            // state without overriding the page's own CSS where it cares.
             WebSettingsCompat.setForceDark(web.settings, WebSettingsCompat.FORCE_DARK_AUTO)
         }
 

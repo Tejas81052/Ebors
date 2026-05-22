@@ -107,7 +107,7 @@
                 android:src="@drawable/ic_search_24"
                 app:tint="@color/tab_private_hint" />
 
-            <EditText
+            <me.thimmaiah.ebors.AddressEditText
                 android:id="@+id/private_start_search_input"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

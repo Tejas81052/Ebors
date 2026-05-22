@@ -78,7 +78,7 @@ class StartPageView(
     private val dateView: TextView = overlay.findViewById(R.id.start_page_date)
     private val greetingTopView: TextView = overlay.findViewById(R.id.start_page_greeting_top)
     private val greetingBottomView: TextView = overlay.findViewById(R.id.start_page_greeting_bottom)
-    private val searchInput: android.widget.EditText =
+    private val searchInput: AddressEditText =
         overlay.findViewById(R.id.start_page_search_input)
     private val engineBadge: TextView = overlay.findViewById(R.id.start_page_engine_badge)
     private val suggestionsContainer: LinearLayout =
@@ -115,7 +115,10 @@ class StartPageView(
             val pressedEnter = event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
                 event.action == android.view.KeyEvent.ACTION_DOWN
             if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO || pressedEnter) {
-                listener.onStartPageQuerySubmitted(searchInput.text?.toString().orEmpty())
+                val query = searchInput.text?.toString().orEmpty()
+                collapseSuggestions()
+                // The host hides the keyboard (window-level) and navigates.
+                listener.onStartPageQuerySubmitted(query)
                 true
             } else {
                 false
@@ -133,6 +136,24 @@ class StartPageView(
             if (hasFocus) refreshSearchSuggestions(searchInput.text?.toString().orEmpty())
             else hideSearchSuggestions()
         }
+        // Dismiss the dropdown on BACK (older devices); the host's
+        // IME-inset listener handles focus + navigation.
+        searchInput.onBackPreIme = { collapseSuggestions() }
+    }
+
+    /** True while the user is actively editing the home-page search. */
+    fun isEditing(): Boolean = searchInput.isFocused
+
+    /** Collapse the suggestion list + drop focus. Called by the host when
+     *  the keyboard is dismissed so the dropdown never lingers. */
+    fun onKeyboardHidden() {
+        collapseSuggestions()
+        if (searchInput.isFocused) searchInput.clearFocus()
+    }
+
+    private fun collapseSuggestions() {
+        suggestionsContainer.isVisible = false
+        suggestionsContainer.removeAllViews()
     }
 
     private fun refreshSearchSuggestions(query: String) {

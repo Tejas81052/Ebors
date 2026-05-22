@@ -59,7 +59,7 @@
                         android:src="@drawable/ic_lock_24"
                         app:tint="@color/browser_hint" />
 
-                    <EditText
+                    <me.thimmaiah.ebors.AddressEditText
                         android:id="@+id/address_bar"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"

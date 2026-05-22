@@ -113,7 +113,7 @@
                 android:src="@drawable/ic_search_24"
                 app:tint="@color/browser_hint" />
 
-            <EditText
+            <me.thimmaiah.ebors.AddressEditText
                 android:id="@+id/start_page_search_input"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

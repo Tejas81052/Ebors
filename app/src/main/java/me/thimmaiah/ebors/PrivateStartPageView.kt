@@ -27,7 +27,6 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -70,7 +69,7 @@ class PrivateStartPageView(
     }
 
     private val searchPill: View = overlay.findViewById(R.id.private_start_search_pill)
-    private val searchInput: EditText = overlay.findViewById(R.id.private_start_search_input)
+    private val searchInput: AddressEditText = overlay.findViewById(R.id.private_start_search_input)
     private val engineBadge: TextView = overlay.findViewById(R.id.private_start_engine_badge)
     private val quickRow: LinearLayout = overlay.findViewById(R.id.private_start_quick_row)
     private val disclaimer: TextView = overlay.findViewById(R.id.private_start_disclaimer)
@@ -179,6 +178,8 @@ class PrivateStartPageView(
                 event.action == KeyEvent.ACTION_DOWN
             if (actionId == EditorInfo.IME_ACTION_GO || pressedEnter) {
                 val text = searchInput.text?.toString().orEmpty()
+                collapseSuggestions()
+                // The host hides the keyboard (window-level) and navigates.
                 listener.onStartPageQuerySubmitted(text)
                 true
             } else {
@@ -199,6 +200,25 @@ class PrivateStartPageView(
             if (hasFocus) refreshSuggestions(searchInput.text?.toString().orEmpty())
             else hideSuggestions()
         }
+
+        // Dismiss the dropdown on BACK (older devices); the host's
+        // IME-inset listener handles focus + navigation.
+        searchInput.onBackPreIme = { collapseSuggestions() }
+    }
+
+    /** True while the user is actively editing the private search. */
+    fun isEditing(): Boolean = searchInput.isFocused
+
+    /** Collapse the dropdown + drop focus. Called by the host when the
+     *  keyboard is dismissed so the dropdown never lingers. */
+    fun onKeyboardHidden() {
+        collapseSuggestions()
+        if (searchInput.isFocused) searchInput.clearFocus()
+    }
+
+    private fun collapseSuggestions() {
+        suggestionsContainer.isVisible = false
+        suggestionsContainer.removeAllViews()
     }
 
     /** Filter HistoryRepository — note: HistoryRepository only stores

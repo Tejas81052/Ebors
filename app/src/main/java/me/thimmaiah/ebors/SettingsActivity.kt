@@ -29,6 +29,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -86,7 +87,16 @@ class SettingsActivity : AppCompatActivity() {
             R.string.setting_force_dark_title,
             R.string.setting_force_dark_summary,
             { prefs.forceDark },
-            { prefs.forceDark = it },
+            {
+                prefs.forceDark = it
+                // Drive the whole app's day/night theme, not just web
+                // content. recreate()s started activities so the new
+                // theme applies immediately.
+                AppCompatDelegate.setDefaultNightMode(
+                    if (it) AppCompatDelegate.MODE_NIGHT_YES
+                    else AppCompatDelegate.MODE_NIGHT_NO,
+                )
+            },
         )
         bindAccentRow()
         bindSwitchRow(
