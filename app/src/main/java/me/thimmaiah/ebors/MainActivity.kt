@@ -169,6 +169,12 @@ class MainActivity : AppCompatActivity() {
 
     private var privateStartPageView: PrivateStartPageView? = null
 
+    /** Drives the animated offline screen; constructed on first show so
+     *  its findViewById lands after the overlay include is in the tree. */
+    private val noInternetController: NoInternetController by lazy { NoInternetController(this) }
+    private var offlineShowing = false
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
     private var permissionInFlightTabId: String? = null
     private var geolocationInFlightTabId: String? = null
 
@@ -453,6 +459,8 @@ class MainActivity : AppCompatActivity() {
             if (tabs.isNotEmpty()) tabs[0].webView.pauseTimers()
             for (tab in tabs) tab.webView.onPause()
         }
+        if (offlineShowing) noInternetController.stopAnimations()
+        unregisterNetworkCallback()
         super.onPause()
     }
 
@@ -471,10 +479,15 @@ class MainActivity : AppCompatActivity() {
         applyPreferences()
 
         if (startPageView?.isShowing() == true) startPageView?.refresh()
+        if (offlineShowing) noInternetController.startAnimations()
+        registerNetworkCallback()
+        // Recover from a reconnect that happened while backgrounded.
+        if (offlineShowing && !isDeviceOffline()) onNetworkBackOnline()
     }
 
     override fun onDestroy() {
         exitFullscreen()
+        if (offlineShowing) noInternetController.stopAnimations()
         // Tabs are torn down below, so any web media is gone — release the
         // session/notification and stop masking transport actions.
         MediaPlaybackService.transportCallback = null
@@ -618,6 +631,10 @@ class MainActivity : AppCompatActivity() {
         updateNavigationButtons()
 
         hideFindBar()
+        // The offline overlay is a shared surface: re-decide whether it
+        // belongs over the now-active tab (persistent per offline tab,
+        // recovers when back online) instead of blindly hiding it.
+        evaluateOfflineForActiveTab()
         scrollDirAccumPx = 0
         setChromeHidden(false)
 
@@ -1719,6 +1736,18 @@ class MainActivity : AppCompatActivity() {
                     view?.loadUrl(UrlInputUtils.upgradeToHttps(targetUrl))
                     return true
                 }
+                // A link tap is a renderer-initiated navigation, which
+                // doesn't reliably reach onReceivedError the way a
+                // programmatic reload does — so the offline screen wouldn't
+                // appear on a tap, only on refresh. Surface it here when
+                // we're offline. If the target turns out to be cached and
+                // loads anyway, onPageFinished clears the overlay again.
+                if (request?.isForMainFrame == true &&
+                    tab === activeTabOrNull &&
+                    isDeviceOffline()
+                ) {
+                    showOfflineScreen()
+                }
                 return false
             }
 
@@ -1750,6 +1779,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 url?.let { tab.displayUrl = it }
                 tab.insecurePageWarningShown = false
+                tab.mainFrameErrored = false
 
                 refreshSuppressedByJs = false
                 if (tab === activeTabOrNull) {
@@ -1780,6 +1810,10 @@ class MainActivity : AppCompatActivity() {
                     webContainer.isRefreshing = false
                     updateAddressBar(url)
                     updateNavigationButtons()
+                    // A finish without a main-frame error means the page
+                    // actually loaded — clear any offline overlay left up
+                    // from a previous failed attempt in this tab.
+                    if (!tab.mainFrameErrored) hideOfflineScreen()
                 }
             }
 
@@ -1803,10 +1837,20 @@ class MainActivity : AppCompatActivity() {
                 error: WebResourceError?,
             ) {
                 super.onReceivedError(view, request, error)
-                if (tab === activeTabOrNull && request?.isForMainFrame == true) {
-                    progressBar.isVisible = false
-                    webContainer.isRefreshing = false
-                    updateNavigationButtons()
+                if (request?.isForMainFrame == true) {
+                    tab.mainFrameErrored = true
+                    if (tab === activeTabOrNull) {
+                        progressBar.isVisible = false
+                        webContainer.isRefreshing = false
+                        updateNavigationButtons()
+                        // Only surface the branded offline screen when the
+                        // device genuinely has no connectivity — a per-site
+                        // failure (DNS typo, server down) while online still
+                        // shows the WebView's own error page.
+                        if (isDeviceOffline()) {
+                            showOfflineScreen()
+                        }
+                    }
                 }
             }
         }
@@ -2200,6 +2244,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (findBar.isVisible) {
                     hideFindBar()
+                    return
+                }
+                // Offline screen up: dismiss it and reveal the last good
+                // page (or home) instead of leaving the overlay stranded
+                // over the failed page.
+                if (offlineShowing) {
+                    hideOfflineScreen()
+                    val offlineTab = activeTabOrNull
+                    if (offlineTab != null && offlineTab.webView.canGoBack()) {
+                        offlineTab.webView.goBack()
+                    } else {
+                        loadAddress(ABOUT_HOME_URL)
+                    }
+                    backToExitArmed = false
+                    updateNavigationButtons()
                     return
                 }
                 val tab = activeTabOrNull
@@ -2656,6 +2715,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadAddress(url: String) {
+        hideOfflineScreen()
         val tab = activeTabOrNull
         if (tab == null) {
 
@@ -2675,6 +2735,111 @@ class MainActivity : AppCompatActivity() {
         updateAddressBar(url)
         tab.displayUrl = url
         tab.webView.loadUrl(url)
+    }
+
+    /** True when the device has no usable network (no active network, or
+     *  the active network can't reach the internet). Defaults to "online"
+     *  when connectivity can't be queried so we never falsely block a load
+     *  behind the offline screen. */
+    private fun isDeviceOffline(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            ?: return false
+        val network = cm.activeNetwork ?: return true
+        val caps = cm.getNetworkCapabilities(network) ?: return true
+        return !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun showOfflineScreen() {
+        hideStartPage()
+        hideFindBar()
+        findViewById<View>(R.id.no_internet_overlay).isVisible = true
+        offlineShowing = true
+        noInternetController.show {
+            // Manual retry: reload. A successful load clears the overlay
+            // in onPageFinished; a repeat failure re-shows it.
+            activeTabOrNull?.webView?.reload()
+        }
+    }
+
+    private fun hideOfflineScreen() {
+        if (!offlineShowing) return
+        offlineShowing = false
+        noInternetController.stopAnimations()
+        findViewById<View>(R.id.no_internet_overlay).isVisible = false
+    }
+
+    /**
+     * The offline overlay is one shared surface, not per-tab, so on every
+     * tab switch we re-decide what belongs over the now-active tab:
+     *  - it failed and we're still offline → show the branded screen
+     *    (this is what stops a stale native error page showing through);
+     *  - it failed but we're back online → reload to recover it;
+     *  - otherwise → hide.
+     */
+    private fun evaluateOfflineForActiveTab() {
+        val tab = activeTabOrNull
+        if (tab != null && tab.mainFrameErrored) {
+            if (isDeviceOffline()) {
+                showOfflineScreen()
+            } else {
+                hideOfflineScreen()
+                if (tab.webView.url != null) tab.webView.reload()
+            }
+        } else {
+            hideOfflineScreen()
+        }
+    }
+
+    /**
+     * Reconnect handler (driven by [networkCallback]): recover any tab
+     * stranded on an offline error. The active tab reloads immediately;
+     * background tabs reload the next time they're activated. Event-driven
+     * off the connectivity callback, so there's no battery-wasting poll —
+     * recovery happens the instant the line is back.
+     */
+    private fun onNetworkBackOnline() {
+        val active = activeTabOrNull
+        var recoveredActive = false
+        for (tab in tabs) {
+            if (!tab.mainFrameErrored) continue
+            if (tab === active && tab.webView.url != null) {
+                tab.webView.reload()
+                recoveredActive = true
+            } else if (tab !== active) {
+                tab.pendingReloadOnActivate = true
+            }
+        }
+        if (!recoveredActive && offlineShowing) {
+            // Active tab had nothing to reload (e.g. a blank failed load);
+            // drop the overlay so the user isn't stuck behind it.
+            hideOfflineScreen()
+        }
+    }
+
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            ?: return
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(
+                network: android.net.Network,
+                caps: android.net.NetworkCapabilities,
+            ) {
+                if (caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                ) {
+                    runOnUiThread { onNetworkBackOnline() }
+                }
+            }
+        }
+        networkCallback = callback
+        runCatching { cm.registerDefaultNetworkCallback(callback) }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        networkCallback?.let { cb -> cm?.let { runCatching { it.unregisterNetworkCallback(cb) } } }
+        networkCallback = null
     }
 
     private fun showStartPage() {

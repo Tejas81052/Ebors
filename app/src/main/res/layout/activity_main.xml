@@ -247,6 +247,18 @@
                 android:visibility="gone" />
 
             <!--
+              Animated offline screen. Shown over the WebView (chrome stays
+              visible) when a main-frame load fails with no connectivity;
+              cleared on retry / navigation / tab switch.
+            -->
+            <include
+                android:id="@+id/no_internet_overlay"
+                layout="@layout/activity_no_internet"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <!--
               v10 full-screen tab-switcher overlay.
             -->
             <LinearLayout

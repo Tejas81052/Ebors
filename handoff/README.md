@@ -67,7 +67,78 @@ The prototype uses Instrument Serif + Geist + JetBrains Mono. On Android, `fontF
 
 ---
 
-## Welcome flow (`activity_welcome.xml`)
+## No-internet screen (`activity_no_internet.xml`)
+
+Animated offline state shown when `ConnectivityManager.activeNetwork == null` or `WebViewClient.onReceivedError` fires with `ERR_INTERNET_DISCONNECTED`. Replaces the WebView in `web_container` until the user taps Try Again.
+
+### Drop-ins
+
+| File | Destination | Status |
+|---|---|---|
+| `handoff/res/layout/activity_no_internet.xml` | `app/src/main/res/layout/` | **add** |
+| `handoff/res/drawable/ill_no_internet_hero.xml` | `app/src/main/res/drawable/` | **add** (static composition) |
+| `handoff/res/drawable/avd_no_internet_hero.xml` | `app/src/main/res/drawable/` | **add** (animations) |
+| `handoff/res/drawable/bg_no_internet_stamp.xml` | `app/src/main/res/drawable/` | **add** (perforated stamp button) |
+| `handoff/res/drawable/bg_no_internet_stamp_chip.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/res/drawable/bg_no_internet_tab_pill.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/res/drawable/bg_no_internet_favicon.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/res/drawable/ic_no_internet_globe.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/strings.no_internet.xml` | merge into `values/strings.xml` | **add 6 strings + 1 path** |
+| `handoff/NoInternetActivity.patch.kt` | merge into `MainActivity` | **add `NoInternetController`** |
+
+### Animations packed in the AVD
+
+The hero uses **one** AnimatedVectorDrawable wrapping a single static vector. Each animated piece is a named `<group>` or `<path>` and the AVD has a `<target>` per piece:
+
+| Target | What it does | Period |
+|---|---|---|
+| `grp_compass` | 360° rotation | 60s linear loop |
+| `grp_pin` | translateY 0 → −3 (bob) | 3.4s ease, reverse |
+| `grp_arc_{1..3}` | alpha 0.15 → 0.55 pulse | 3s, staggered 0/0.5/1s |
+| `path_flight` | `trimPathOffset` 0 → 0.25 (dash crawl) | 1.6s linear loop |
+| `grp_plane_push` | keyframed translateX/Y/rotation (push & bounce) | 4.6s loop |
+| `grp_plane_bob` | translateY 0 → −3 (bob layered on push) | 2.8s ease, reverse |
+| `grp_ripple_{1..3}` | scale 0.2 → 2.2 + alpha 0.55 → 0 | 2.6s, staggered 0/0.9/1.8s |
+| `grp_specks_{1..3}` | translateY 0 → −310 (drift up) | 7/8.5/9.5s loop |
+
+`(hero.drawable as Animatable).start()` kicks them all off; `.stop()` halts cleanly.
+
+### Why the stamp path is a string resource
+
+The perforated outline traces 60+ `M/L/A` commands. Both the shadow and the fill in `bg_no_internet_stamp.xml` reference the same path — extracting it to `strings.xml` (`@string/no_internet_stamp_path`, marked `translatable="false"`) keeps them in lockstep. Editing the shape later only touches one place.
+
+### Refresh icon spin
+
+The CSS keyframe holds for 60% of the cycle then sweeps −360° with ease-in-out. The Kotlin patch uses a `ValueAnimator` + `PathInterpolator(0.6, 0, 0.45, 1)` to match — flat through 0..0.6, accelerated curve to the end. Cancel it in `onPause` to save the CPU cycle when the user backgrounds the app.
+
+### Wiring it up
+
+```kotlin
+private lateinit var offlineCtrl: NoInternetController
+private val offlineView: View by lazy {
+    layoutInflater.inflate(R.layout.activity_no_internet, web_container, false)
+        .also { it.visibility = View.GONE; web_container.addView(it) }
+}
+
+private fun showOffline(failedUrl: String) {
+    offlineView.visibility = View.VISIBLE
+    webView.visibility = View.GONE
+    offlineCtrl = NoInternetController(this).also {
+        it.show(Uri.parse(failedUrl).host ?: failedUrl) {
+            offlineView.visibility = View.GONE
+            webView.visibility = View.VISIBLE
+            it.hide()
+            webView.reload()
+        }
+    }
+}
+```
+
+`MainActivity` already routes `WebViewClient.onReceivedError` — just call `showOffline(failingUrl)` from that path when the error code is `ERR_INTERNET_DISCONNECTED` or `ERR_ADDRESS_UNREACHABLE`.
+
+---
+
+
 
 Three-page intro: Welcome / Privacy promise / Default browser. Re-skin only — every existing view ID and string reference is preserved, so `WelcomeActivity.kt` compiles unchanged (one optional patch adds the step indicator + promise binding).
 

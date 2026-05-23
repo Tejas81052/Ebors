@@ -103,6 +103,16 @@ class Tab(
      */
     var insecurePageWarningShown: Boolean = false
 
+    /**
+     * Set when the most recent main-frame load failed at the network level
+     * ([android.webkit.WebViewClient.onReceivedError] for the main frame).
+     * Cleared on [android.webkit.WebViewClient.onPageStarted]. The activity
+     * uses it to decide whether `onPageFinished` represents a real page
+     * (clear the offline overlay) or the error page that follows a failure
+     * (leave the overlay up).
+     */
+    var mainFrameErrored: Boolean = false
+
     /** WebView media permission prompt awaiting an Android runtime grant. */
     var pendingWebsitePermission: PendingWebsitePermission? = null
 
