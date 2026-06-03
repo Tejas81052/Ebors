@@ -100,6 +100,13 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         get() = prefs.getBoolean(KEY_BLOCK_POPUPS, true)
         set(value) = prefs.edit { putBoolean(KEY_BLOCK_POPUPS, value) }
 
+    /** Put tabs left untouched for a few minutes to sleep — their page is
+     *  dropped to free memory and reloaded when you return to the tab.
+     *  Default on; the trade-off is a quick reload on a long-idle tab. */
+    var tabSleeping: Boolean
+        get() = prefs.getBoolean(KEY_TAB_SLEEPING, true)
+        set(value) = prefs.edit { putBoolean(KEY_TAB_SLEEPING, value) }
+
     /**
      * Upgrade `http://` navigations to `https://` when the host isn't
      * localhost or a private network address. Default on — matches Chrome's
@@ -278,6 +285,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
             if (!prefs.contains(KEY_HISTORY_ENABLED)) putBoolean(KEY_HISTORY_ENABLED, true)
             if (!prefs.contains(KEY_JS_ENABLED)) putBoolean(KEY_JS_ENABLED, true)
             if (!prefs.contains(KEY_BLOCK_POPUPS)) putBoolean(KEY_BLOCK_POPUPS, true)
+            if (!prefs.contains(KEY_TAB_SLEEPING)) putBoolean(KEY_TAB_SLEEPING, true)
         }
     }
 
@@ -344,6 +352,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         private const val KEY_JS_ENABLED = "key_javascript_enabled"
         private const val KEY_HISTORY_ENABLED = "key_history_enabled"
         private const val KEY_BLOCK_POPUPS = "key_block_popups"
+        private const val KEY_TAB_SLEEPING = "key_tab_sleeping"
         private const val KEY_HOME_PAGE = "key_home_page"
         private const val KEY_DEFAULT_BROWSER_PROMPT_SHOWN = "key_default_browser_prompt_shown"
         private const val KEY_NOTIFICATION_PERMISSION_PROMPT_SHOWN = "key_notification_permission_prompt_shown"

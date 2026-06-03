@@ -179,6 +179,8 @@
     <string name="setting_javascript_summary">Most modern sites need this. Turn off for a plain-HTML web.</string>
     <string name="setting_block_popups_title">Block popups</string>
     <string name="setting_block_popups_summary">Stop sites from opening new windows. May break some sign-in flows.</string>
+    <string name="setting_tab_sleeping_title">Sleep inactive tabs</string>
+    <string name="setting_tab_sleeping_summary">Free memory by unloading tabs left unused for a few minutes; they reload when you return.</string>
     <string name="setting_always_https_title">Always use HTTPS</string>
     <string name="setting_always_https_summary">Upgrade http:// links to https:// automatically. Localhost and private network addresses are not upgraded.</string>
     <string name="setting_allow_mixed_content_title">Allow mixed content</string>

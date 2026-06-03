@@ -186,6 +186,10 @@
                 android:id="@+id/row_block_popups"
                 layout="@layout/item_settings_switch" />
 
+            <include
+                android:id="@+id/row_tab_sleeping"
+                layout="@layout/item_settings_switch" />
+
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/row_notification_permission"
                 style="@style/SettingsRowCard"

@@ -197,6 +197,13 @@ class SettingsActivity : AppCompatActivity() {
             { prefs.blockPopups },
             { prefs.blockPopups = it },
         )
+        bindSwitchRow(
+            R.id.row_tab_sleeping,
+            R.string.setting_tab_sleeping_title,
+            R.string.setting_tab_sleeping_summary,
+            { prefs.tabSleeping },
+            { prefs.tabSleeping = it },
+        )
 
         val searchSummary = findViewById<TextView>(R.id.search_engine_summary)
         searchSummary.text = SearchEngineResolver.displayName(prefs)

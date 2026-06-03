@@ -74,6 +74,11 @@ class Tab(
      *  and used to repopulate the address bar when the user switches to it. */
     var displayUrl: String = ""
 
+    /** Wall-clock time this tab was last the active/foreground tab (set when
+     *  it's switched away from). Drives proactive tab-sleeping: a background
+     *  tab idle past the threshold has its page dropped to free memory. */
+    var lastActiveAt: Long = System.currentTimeMillis()
+
     /**
      * URL queued for load on first activation. Background-opened tabs
      * (`openNewTab(switchTo = false)`) defer the network fetch until

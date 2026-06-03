@@ -461,6 +461,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (offlineShowing) noInternetController.stopAnimations()
         unregisterNetworkCallback()
+        tabSleepHandler.removeCallbacks(tabSleepChecker)
         super.onPause()
     }
 
@@ -481,8 +482,77 @@ class MainActivity : AppCompatActivity() {
         if (startPageView?.isShowing() == true) startPageView?.refresh()
         if (offlineShowing) noInternetController.startAnimations()
         registerNetworkCallback()
+        tabSleepHandler.removeCallbacks(tabSleepChecker)
+        tabSleepHandler.postDelayed(tabSleepChecker, TAB_SLEEP_CHECK_INTERVAL_MS)
         // Recover from a reconnect that happened while backgrounded.
         if (offlineShowing && !isDeviceOffline()) onNetworkBackOnline()
+    }
+
+    /**
+     * Respond to system memory pressure by discarding background tabs (the
+     * app previously held every tab's full page in RAM forever). Only the
+     * levels that signal genuine pressure act — foreground low/critical and
+     * background moderate/complete — so normal backgrounding never triggers
+     * a needless reload.
+     */
+    @Suppress("DEPRECATION") // TRIM_MEMORY_MODERATE/COMPLETE still fire on older OS
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when (level) {
+            TRIM_MEMORY_RUNNING_LOW, TRIM_MEMORY_RUNNING_CRITICAL,
+            TRIM_MEMORY_MODERATE, TRIM_MEMORY_COMPLETE,
+            -> discardBackgroundTabs()
+        }
+    }
+
+    /**
+     * Navigate every non-active, non-media tab to about:blank so its heavy
+     * page releases renderer memory, queuing a reload on next activation via
+     * [Tab.pendingLoadUrl] (the same path background-opened tabs already use).
+     * The foreground tab and any tab playing media are always kept intact.
+     */
+    private fun discardBackgroundTabs() {
+        val active = activeTabOrNull
+        for (tab in tabs) if (isDiscardable(tab, active)) discardTabPage(tab)
+    }
+
+    /**
+     * Proactive tab sleeping: discard tabs left untouched past
+     * [TAB_SLEEP_AFTER_MS], before memory pressure ever hits. Runs on a timer
+     * while the app is foreground, gated on [BrowserPreferences.tabSleeping].
+     */
+    private fun sleepIdleTabs() {
+        val active = activeTabOrNull
+        val now = System.currentTimeMillis()
+        for (tab in tabs) {
+            if (isDiscardable(tab, active) && now - tab.lastActiveAt >= TAB_SLEEP_AFTER_MS) {
+                discardTabPage(tab)
+            }
+        }
+    }
+
+    /** A tab is discardable when it isn't the foreground tab, isn't driving
+     *  media, isn't already discarded/deferred, and holds a real page. */
+    private fun isDiscardable(tab: Tab, active: Tab?): Boolean {
+        if (tab === active || tab === mediaPlayingTab) return false
+        if (tab.pendingLoadUrl != null) return false
+        val url = tab.displayUrl
+        return url.isNotBlank() && url != ABOUT_HOME_URL && url != ABOUT_BLANK_URL
+    }
+
+    /** Park [tab] on about:blank to free its renderer memory, remembering its
+     *  URL so switchToTab reloads it on reactivation. */
+    private fun discardTabPage(tab: Tab) {
+        tab.pendingLoadUrl = tab.displayUrl
+        tab.webView.loadUrl(ABOUT_BLANK_URL)
+    }
+
+    private val tabSleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val tabSleepChecker = object : Runnable {
+        override fun run() {
+            if (prefs.tabSleeping) sleepIdleTabs()
+            tabSleepHandler.postDelayed(this, TAB_SLEEP_CHECK_INTERVAL_MS)
+        }
     }
 
     override fun onDestroy() {
@@ -500,6 +570,7 @@ class MainActivity : AppCompatActivity() {
         findDebounceRunnable = null
 
         inactivityHandler.removeCallbacksAndMessages(null)
+        tabSleepHandler.removeCallbacksAndMessages(null)
 
         speechActive = false
         destroySpeechRecognizer()
@@ -592,6 +663,7 @@ class MainActivity : AppCompatActivity() {
 
         previousActive?.let {
 
+            it.lastActiveAt = System.currentTimeMillis()
             it.captureThumbnail()
             webHost.removeView(it.webView)
             it.webView.onPause()
@@ -1777,7 +1849,7 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     hideStartPage()
                 }
-                url?.let { tab.displayUrl = it }
+                url?.takeUnless { it == ABOUT_BLANK_URL }?.let { tab.displayUrl = it }
                 tab.insecurePageWarningShown = false
                 tab.mainFrameErrored = false
 
@@ -1798,10 +1870,11 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 injectPageScripts(view, url)
-                url?.let { tab.displayUrl = it }
-                view?.title?.let { tab.displayTitle = it }
-                if (prefs.historyEnabled && !tab.isPrivate && !url.isNullOrBlank()) {
-
+                url?.takeUnless { it == ABOUT_BLANK_URL }?.let { tab.displayUrl = it }
+                if (url != ABOUT_BLANK_URL) view?.title?.let { tab.displayTitle = it }
+                if (prefs.historyEnabled && !tab.isPrivate &&
+                    !url.isNullOrBlank() && url != ABOUT_BLANK_URL
+                ) {
                     HistoryRepository.record(url, view?.title.orEmpty())
                 }
                 if (tab === activeTabOrNull) {
@@ -3573,6 +3646,18 @@ class MainActivity : AppCompatActivity() {
         private const val PRIVATE_PROFILE_NAME = "incognito"
 
         const val ABOUT_HOME_URL = "about:home"
+
+        /** Blank page a backgrounded tab is parked on when discarded under
+         *  memory pressure; its real URL is reloaded from pendingLoadUrl on
+         *  reactivation. Excluded from history and the tab's display URL. */
+        private const val ABOUT_BLANK_URL = "about:blank"
+
+        /** Proactive tab sleeping: a background tab idle this long is parked
+         *  on about:blank to free memory (reloads when you return to it). */
+        private const val TAB_SLEEP_AFTER_MS = 3L * 60L * 1000L // 3 minutes
+
+        /** How often the sleep checker scans for idle tabs while foreground. */
+        private const val TAB_SLEEP_CHECK_INTERVAL_MS = 60L * 1000L
 
         private val ALLOWED_EXTERNAL_INTENT_ACTIONS = setOf(
             Intent.ACTION_VIEW,
