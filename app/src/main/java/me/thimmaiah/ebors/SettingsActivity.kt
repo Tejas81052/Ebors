@@ -29,7 +29,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -81,22 +80,6 @@ class SettingsActivity : AppCompatActivity() {
             R.string.setting_desktop_mode_summary,
             { prefs.desktopMode },
             { prefs.desktopMode = it },
-        )
-        bindSwitchRow(
-            R.id.row_force_dark,
-            R.string.setting_force_dark_title,
-            R.string.setting_force_dark_summary,
-            { prefs.forceDark },
-            {
-                prefs.forceDark = it
-                // Drive the whole app's day/night theme, not just web
-                // content. recreate()s started activities so the new
-                // theme applies immediately.
-                AppCompatDelegate.setDefaultNightMode(
-                    if (it) AppCompatDelegate.MODE_NIGHT_YES
-                    else AppCompatDelegate.MODE_NIGHT_NO,
-                )
-            },
         )
         bindAccentRow()
         bindSwitchRow(
@@ -184,6 +167,13 @@ class SettingsActivity : AppCompatActivity() {
             { prefs.historyEnabled = it },
         )
         bindSwitchRow(
+            R.id.row_search_suggestions,
+            R.string.setting_search_suggestions_title,
+            R.string.setting_search_suggestions_summary,
+            { prefs.searchSuggestionsEnabled },
+            { prefs.searchSuggestionsEnabled = it },
+        )
+        bindSwitchRow(
             R.id.row_javascript,
             R.string.setting_javascript_title,
             R.string.setting_javascript_summary,
@@ -203,6 +193,13 @@ class SettingsActivity : AppCompatActivity() {
             R.string.setting_tab_sleeping_summary,
             { prefs.tabSleeping },
             { prefs.tabSleeping = it },
+        )
+        bindSwitchRow(
+            R.id.row_clear_data_on_exit,
+            R.string.setting_clear_data_on_exit_title,
+            R.string.setting_clear_data_on_exit_summary,
+            { prefs.clearDataOnExit },
+            { prefs.clearDataOnExit = it },
         )
 
         val searchSummary = findViewById<TextView>(R.id.search_engine_summary)

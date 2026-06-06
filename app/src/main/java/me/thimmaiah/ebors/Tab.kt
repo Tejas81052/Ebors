@@ -118,6 +118,22 @@ class Tab(
      */
     var mainFrameErrored: Boolean = false
 
+    /**
+     * The unresolved host-lookup failing URL for this tab, or `null` when the
+     * tab has no outstanding host-resolution failure. Set when
+     * [android.webkit.WebViewClient.onReceivedError] routes a main-frame
+     * failure to the site-not-found surface (`resolveErrorSurface` returns
+     * `SITE_NOT_FOUND`). Cleared on
+     * [android.webkit.WebViewClient.onPageStarted] (a new attempt begins) and
+     * on a successful [android.webkit.WebViewClient.onPageFinished] — mirroring
+     * how [mainFrameErrored] is managed.
+     *
+     * `siteNotFoundUrl != null` is the per-tab predicate "this tab has an
+     * unresolved host-lookup failure" used by `resolveActiveTabSurface` to
+     * decide which surface belongs over the active tab after a tab switch.
+     */
+    var siteNotFoundUrl: String? = null
+
     /** WebView media permission prompt awaiting an Android runtime grant. */
     var pendingWebsitePermission: PendingWebsitePermission? = null
 

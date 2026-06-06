@@ -86,6 +86,36 @@ class BrowserBlockerTest {
     }
 
     @Test
+    fun youtubeStartupLogEventIsAllowedWithoutOpeningGenericLogEventTrackers() {
+        assertNull(
+            BrowserBlocker.findMatch(
+                "https://m.youtube.com/youtubei/v1/log_event?alt=json",
+                isMainFrame = false,
+            ),
+        )
+        assertNull(
+            BrowserBlocker.findMatch(
+                "https://www.youtube.com/youtubei/v1/log_event?alt=json",
+                isMainFrame = false,
+            ),
+        )
+
+        val genericTracker = BrowserBlocker.findMatch(
+            "https://news.example.com/log_event?ad_unit=hero",
+            isMainFrame = false,
+        )
+        assertNotNull(genericTracker)
+        assertEquals(BrowserBlocker.BlockingKind.AD_OR_TRACKER, genericTracker?.kind)
+
+        val youtubeAdBeacon = BrowserBlocker.findMatch(
+            "https://www.youtube.com/pagead/viewthroughconversion/123/?label=followon_view",
+            isMainFrame = false,
+        )
+        assertNotNull(youtubeAdBeacon)
+        assertEquals(BrowserBlocker.BlockingKind.AD_OR_TRACKER, youtubeAdBeacon?.kind)
+    }
+
+    @Test
     fun essentialAllowListLetsCaptchaThrough() {
         // recaptcha.net is on the allow list — even though `/recaptcha/` could
         // look ad-ish, this must never be blocked or sign-in breaks.

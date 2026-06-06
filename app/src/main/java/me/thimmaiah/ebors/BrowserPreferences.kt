@@ -58,14 +58,6 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         get() = prefs.getBoolean(KEY_DESKTOP_MODE, false)
         set(value) = prefs.edit { putBoolean(KEY_DESKTOP_MODE, value) }
 
-    /** Apply force-dark / algorithmic darkening to web content. Default
-     *  on so a fresh install lands in dark mode straight away — the app
-     *  shell is dark-themed via DayNight, and force-dark covers the web
-     *  pages so colour transitions don't whiplash on every nav. */
-    var forceDark: Boolean
-        get() = prefs.getBoolean(KEY_FORCE_DARK, true)
-        set(value) = prefs.edit { putBoolean(KEY_FORCE_DARK, value) }
-
     /** Master switch for the network-level ad/tracker blocker. */
     var adBlockEnabled: Boolean
         get() = prefs.getBoolean(KEY_AD_BLOCK, true)
@@ -93,6 +85,16 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
         get() = prefs.getBoolean(KEY_HISTORY_ENABLED, true)
         set(value) = prefs.edit { putBoolean(KEY_HISTORY_ENABLED, value) }
 
+    /**
+     * Send the address-bar prefix to the configured search engine's
+     * autocomplete endpoint for live suggestions. Default on (matches every
+     * mainstream browser). Off falls back to local history + a "search this"
+     * row, so nothing the user types leaves the device until they submit.
+     */
+    var searchSuggestionsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SEARCH_SUGGESTIONS, true)
+        set(value) = prefs.edit { putBoolean(KEY_SEARCH_SUGGESTIONS, value) }
+
     /** Block popup windows opened via window.open(). OAuth still works because
      *  it's an explicit user gesture handled separately. Default on so a
      *  fresh install isn't ambushed by drive-by popunders. */
@@ -106,6 +108,16 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
     var tabSleeping: Boolean
         get() = prefs.getBoolean(KEY_TAB_SLEEPING, true)
         set(value) = prefs.edit { putBoolean(KEY_TAB_SLEEPING, value) }
+
+    /**
+     * Wipe cookies, cache, web storage, history and per-site permissions
+     * when the browser is closed (the task is finished / swiped away).
+     * Default off — opt-in for users who want a clean slate every session.
+     * Private tabs are always wiped on exit regardless of this flag.
+     */
+    var clearDataOnExit: Boolean
+        get() = prefs.getBoolean(KEY_CLEAR_DATA_ON_EXIT, false)
+        set(value) = prefs.edit { putBoolean(KEY_CLEAR_DATA_ON_EXIT, value) }
 
     /**
      * Upgrade `http://` navigations to `https://` when the host isn't
@@ -273,7 +285,6 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
      */
     fun bootstrapDefaults() {
         prefs.edit {
-            if (!prefs.contains(KEY_FORCE_DARK)) putBoolean(KEY_FORCE_DARK, true)
             if (!prefs.contains(KEY_AD_BLOCK)) putBoolean(KEY_AD_BLOCK, true)
             if (!prefs.contains(KEY_SITE_BLOCK)) putBoolean(KEY_SITE_BLOCK, true)
             if (!prefs.contains(KEY_BLOCKLIST_AUTO_UPDATE)) putBoolean(KEY_BLOCKLIST_AUTO_UPDATE, true)
@@ -283,6 +294,7 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
             // [blockWebRtc] KDoc. Blocking it breaks mic/camera/calls.
             if (!prefs.contains(KEY_TRIM_REFERRER)) putBoolean(KEY_TRIM_REFERRER, true)
             if (!prefs.contains(KEY_HISTORY_ENABLED)) putBoolean(KEY_HISTORY_ENABLED, true)
+            if (!prefs.contains(KEY_SEARCH_SUGGESTIONS)) putBoolean(KEY_SEARCH_SUGGESTIONS, true)
             if (!prefs.contains(KEY_JS_ENABLED)) putBoolean(KEY_JS_ENABLED, true)
             if (!prefs.contains(KEY_BLOCK_POPUPS)) putBoolean(KEY_BLOCK_POPUPS, true)
             if (!prefs.contains(KEY_TAB_SLEEPING)) putBoolean(KEY_TAB_SLEEPING, true)
@@ -345,14 +357,15 @@ class BrowserPreferences private constructor(private val prefs: SharedPreference
 
         private const val KEY_SEARCH_ENGINE = "key_search_engine"
         private const val KEY_DESKTOP_MODE = "key_desktop_mode"
-        private const val KEY_FORCE_DARK = "key_force_dark"
         private const val KEY_AD_BLOCK = "key_ad_block"
         private const val KEY_SITE_BLOCK = "key_site_block"
         private const val KEY_THIRD_PARTY_COOKIES = "key_third_party_cookies"
         private const val KEY_JS_ENABLED = "key_javascript_enabled"
         private const val KEY_HISTORY_ENABLED = "key_history_enabled"
+        private const val KEY_SEARCH_SUGGESTIONS = "key_search_suggestions"
         private const val KEY_BLOCK_POPUPS = "key_block_popups"
         private const val KEY_TAB_SLEEPING = "key_tab_sleeping"
+        private const val KEY_CLEAR_DATA_ON_EXIT = "key_clear_data_on_exit"
         private const val KEY_HOME_PAGE = "key_home_page"
         private const val KEY_DEFAULT_BROWSER_PROMPT_SHOWN = "key_default_browser_prompt_shown"
         private const val KEY_NOTIFICATION_PERMISSION_PROMPT_SHOWN = "key_notification_permission_prompt_shown"

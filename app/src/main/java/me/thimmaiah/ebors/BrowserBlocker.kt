@@ -371,6 +371,9 @@ object BrowserBlocker {
 
             val path = (parsed.rawPath.orEmpty() + (parsed.rawQuery?.let { "?$it" } ?: ""))
                 .lowercase(Locale.US)
+            if (isAllowedFirstPartyStartupRequest(host, path)) {
+                return null
+            }
             if (path.isNotEmpty()) {
                 if (containsPathSignal(path, blockList.adPathSignals)) {
                     return BlockingMatch(kind = BlockingKind.AD_OR_TRACKER, host = host)
@@ -383,6 +386,22 @@ object BrowserBlocker {
 
         return null
     }
+
+    private fun isAllowedFirstPartyStartupRequest(host: String, path: String): Boolean {
+        if (!isYouTubeHost(host)) return false
+
+        // Mobile YouTube waits on this first-party Innertube event stream
+        // during watch startup. Blocking it makes the player retry with a
+        // visible 4-10s delay, while the actual ad surfaces are still handled
+        // by DoubleClick/pagead host rules and the player-response pruner.
+        return path.startsWith("/youtubei/v1/log_event")
+    }
+
+    private fun isYouTubeHost(host: String): Boolean =
+        host == "youtube.com" ||
+            host == "m.youtube.com" ||
+            host == "www.youtube.com" ||
+            host.endsWith(".youtube.com")
 
     /**
      * CSS rules injected after page load to hide common ad slot containers
@@ -660,9 +679,12 @@ $webRtcBlock
         """.trimIndent()
     }
 
-    // B19: pre-rendered once at class load. The string is ~5 KB and the
-    // template build doesn't depend on any runtime state, so a single
-    // `val` is the simplest cache.
+    // B19: pre-rendered once at class load; the template has no runtime
+    // state so a single `val` caches it. Redesigned for latency — only
+    // /youtubei/v1/player (and Shorts reel) responses are inspected, a cheap
+    // substring pre-check skips JSON parsing unless an ad is actually
+    // present, and XHR reads are memoised — so a tapped video starts with no
+    // added delay while ads are still stripped.
     private val cachedYouTubeScript: String = """
         (function() {
             try {
@@ -672,23 +694,27 @@ $webRtcBlock
                     return;
                 }
 
-                var YT_API = /\/youtubei\/v1\/(player|next|browse|search|reel|guide|account_menu)/;
+                // Watch-config endpoints that carry pre-roll / mid-roll ad
+                // scheduling. CRITICAL: mobile m.youtube.com uses get_watch (not
+                // player) — missing it meant ads were never stripped on mobile,
+                // so the ad creative had to download + auto-skip before the real
+                // video began (the 4-16s delay). Desktop uses player; Shorts use
+                // reel_*. Feed/search/guide ads stay cosmetic (CSS), so we don't
+                // parse those large, frequent responses.
+                var YT_PLAYER_API = /\/youtubei\/v1\/(player|get_watch|reel_item_watch|reel_watch_sequence)/;
 
-                // Fields anywhere in the response that we strip. Same list
-                // uBlock prunes; safe to remove because the YouTube web app
-                // gracefully handles them being absent.
-                var AD_KEYS = [
-                    'adPlacements',
-                    'adSlots',
-                    'playerAds',
-                    'adBreakHeartbeatParams',
-                    'adSafetyReason',
-                    'adRequestParams',
-                    'adVideoId',
-                    'serviceTrackingParams', // includes ad-related tracking
-                    'pcr',                   // ad-prefetch metadata
-                    'addToWatchLaterCommand'
-                ];
+                // Ad-scheduling keys only. Kept tiny so the substring pre-check
+                // below can skip JSON.parse on any response that has no ads.
+                // (Notably no serviceTrackingParams/addToWatchLaterCommand —
+                // those aren't ad scheduling and stripping them only added
+                // cost and, for watch-later, broke a real button.)
+                var AD_KEYS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
+
+                function hasAdKeys(text) {
+                    return text.indexOf('adPlacements') !== -1 ||
+                           text.indexOf('playerAds') !== -1 ||
+                           text.indexOf('adSlots') !== -1;
+                }
 
                 function strip(obj, depth) {
                     if (!obj || typeof obj !== 'object' || depth > 12) return obj;
@@ -711,7 +737,13 @@ $webRtcBlock
                 }
 
                 function pruneJsonText(text) {
-                    if (typeof text !== 'string' || text.length < 16) return text;
+                    // Fast path: no ad keys in the raw text -> return it
+                    // untouched, skipping JSON.parse / stringify entirely. This
+                    // is what keeps video start instant: the player response is
+                    // only parsed on the rare load that actually carries an ad.
+                    if (typeof text !== 'string' || text.length < 16 || !hasAdKeys(text)) {
+                        return text;
+                    }
                     var trimmed = text.trimStart ? text.trimStart() : text;
                     if (trimmed[0] !== '{' && trimmed[0] !== '[') return text;
                     try {
@@ -733,9 +765,8 @@ $webRtcBlock
                                 ? input
                                 : (input && (input.url || ''));
                         } catch (e) {}
-                        var match = url && YT_API.test(url);
                         var p = origFetch.apply(this, arguments);
-                        if (!match) return p;
+                        if (!url || !YT_PLAYER_API.test(url)) return p;
                         return p.then(function(response) {
                             try {
                                 if (!response || !response.ok) return response;
@@ -772,10 +803,14 @@ $webRtcBlock
                     Object.defineProperty(XMLHttpRequest.prototype, 'responseText', {
                         get: function() {
                             var raw = responseDesc.get.call(this);
-                            if (this.__eb_url && YT_API.test(this.__eb_url)) {
-                                return pruneJsonText(raw);
-                            }
-                            return raw;
+                            if (!this.__eb_url || !YT_PLAYER_API.test(this.__eb_url)) return raw;
+                            // Cache by raw identity so repeated reads of the
+                            // same body never re-parse (the player reads its
+                            // response more than once).
+                            if (this.__eb_text_raw === raw) return this.__eb_text_out;
+                            this.__eb_text_raw = raw;
+                            this.__eb_text_out = pruneJsonText(raw);
+                            return this.__eb_text_out;
                         },
                         configurable: true
                     });
@@ -784,11 +819,12 @@ $webRtcBlock
                     Object.defineProperty(XMLHttpRequest.prototype, 'response', {
                         get: function() {
                             var raw = responseRawDesc.get.call(this);
-                            if (this.__eb_url && YT_API.test(this.__eb_url) &&
-                                typeof raw === 'string') {
-                                return pruneJsonText(raw);
-                            }
-                            return raw;
+                            if (!this.__eb_url || !YT_PLAYER_API.test(this.__eb_url) ||
+                                typeof raw !== 'string') return raw;
+                            if (this.__eb_resp_raw === raw) return this.__eb_resp_out;
+                            this.__eb_resp_raw = raw;
+                            this.__eb_resp_out = pruneJsonText(raw);
+                            return this.__eb_resp_out;
                         },
                         configurable: true
                     });
@@ -867,7 +903,11 @@ $webRtcBlock
         val computedStyleHook = if (aggressive) """
                         var BAIT_TOKENS = ['adsbox', 'ad-banner', 'ad-placeholder', 'ad_unit', 'sponsored-content'];
                         var origGetCS = window.getComputedStyle;
-                        if (typeof origGetCS === 'function') {
+                        // Skip YouTube: it never shows adblock walls, and wrapping
+                        // getComputedStyle (which its player UI calls constantly)
+                        // only adds latency to video start.
+                        if (typeof origGetCS === 'function' &&
+                            (location.hostname || '').toLowerCase().indexOf('youtube.com') === -1) {
                             window.getComputedStyle = function(el, pseudo) {
                                 var cs = origGetCS.call(this, el, pseudo);
                                 try {
@@ -939,7 +979,9 @@ $webRtcBlock
                         try { window.fuckAdBlock = new BlockAdBlockStub(); } catch (e) {}
                         try { window.adblockDetector = { init: noop }; } catch (e) {}
                         try { window.canRunAds = true; } catch (e) {}
+                        try { window.canShowAds = true; } catch (e) {}
                         try { window.isAdBlockActive = false; } catch (e) {}
+                        try { window.adblockDetected = false; } catch (e) {}
                         try { window.adsbygoogle = window.adsbygoogle || { loaded: true, push: noop }; } catch (e) {}
 
 $computedStyleHook

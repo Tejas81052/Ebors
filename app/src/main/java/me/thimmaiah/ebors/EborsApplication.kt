@@ -19,23 +19,15 @@ import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
 
 /**
- * Pins the app's day/night mode to the user's manual "Dark mode"
- * preference instead of following the system theme. Set once per
- * process before any activity inflates, so the chosen mode drives
- * the very first frame. Settings re-applies it live when toggled.
- *
- * Default is dark (the [BrowserPreferences.forceDark] default), so a
- * fresh install lands in dark mode regardless of the system setting.
+ * Makes the app's day/night theme follow the system setting. Applied once
+ * per process before any activity inflates so the very first frame matches
+ * the OS theme. When the system theme changes Android recreates the
+ * activities (uiMode is not in MainActivity's configChanges), which also
+ * re-applies web-content darkening on the next layout.
  */
 class EborsApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        AppCompatDelegate.setDefaultNightMode(
-            if (BrowserPreferences.from(this).forceDark) {
-                AppCompatDelegate.MODE_NIGHT_YES
-            } else {
-                AppCompatDelegate.MODE_NIGHT_NO
-            },
-        )
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
     }
 }

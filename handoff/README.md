@@ -67,7 +67,70 @@ The prototype uses Instrument Serif + Geist + JetBrains Mono. On Android, `fontF
 
 ---
 
-## No-internet screen (`activity_no_internet.xml`)
+## Site not found (`activity_site_not_found.xml`)
+
+Animated "address not found" state — shown when the device is online but the **host doesn't resolve** (`onReceivedError` with `ERROR_HOST_LOOKUP`). Different screen, different metaphor from the offline one: a freestanding door in a field — the browser knocked, nobody's home.
+
+### Drop-ins
+
+| File | Destination | Status |
+|---|---|---|
+| `handoff/res/layout/activity_site_not_found.xml` | `app/src/main/res/layout/` | **add** |
+| `handoff/res/drawable/ill_site_not_found_hero.xml` | `app/src/main/res/drawable/` | **add** (static composition) |
+| `handoff/res/drawable/avd_site_not_found_hero.xml` | `app/src/main/res/drawable/` | **add** (animations) |
+| `handoff/res/drawable/bg_site_not_found_secondary.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/res/drawable/bg_site_not_found_favicon.xml` | `app/src/main/res/drawable/` | **add** |
+| `handoff/strings.site_not_found.xml` | merge into `values/strings.xml` | **add 6 strings** |
+| `handoff/SiteNotFoundActivity.patch.kt` | merge into `MainActivity` | **add `SiteNotFoundController`** |
+
+Reuses `bg_no_internet_tab_pill.xml` and `ic_no_internet_globe.xml` from the no-internet handoff — ship those first (or together).
+
+### Animations packed in the AVD
+
+| Target | What it does | Period |
+|---|---|---|
+| `grp_door` | knock shudder (rotation, hinge-left), still 0–70% of cycle | 4.2s loop |
+| `grp_knock_1/2` | sound rings scale 0.3 → 1.8 + alpha, sync with the knock | 4.2s loop |
+| `grp_plate` | "404" number-plate swing on one screw | 3.6s ease, reverse |
+| `grp_key` | float up, jiggle the lock, give up, drift back (translate + rotate keyframes) | 5.5s loop |
+| `grp_mote_1..4` | dust drifting up-right through the keyhole light + fade | 4s, staggered |
+| `grp_shaft` | light shaft alpha breathe | 4s ease, reverse |
+| `grp_blade_1..5` | grass sway (rotation, bottom pivot) | 3.4s, staggered |
+| `grp_tumble` | paper wad rolling across + spinning | 9s loop |
+| `grp_specks_1..3` | drift up | 7/8.5/9.5s |
+
+`(hero.drawable as Animatable).start()` runs them all.
+
+### Two text caveats (VectorDrawable can't render `<text>`)
+
+1. **"404"** on the plate is drawn as **stroked paths** (three glyphs) inside `grp_plate` — they swing with the plate. Crisp enough at the rendered size.
+2. **"NOT FOUND"** on the doormat is approximated as small tick marks suggesting lettering. If you want real crisp text, drop a tiny rotated `TextView` over the mat in the layout instead — but the ticks read fine at icon scale and keep the hero a single self-contained drawable.
+
+### Controller
+
+`SiteNotFoundController.show(failedUrl, onSearch, onBack, onRetry)`:
+- Strikes through the dead host in the tab pill (`Paint.STRIKE_THRU_TEXT_FLAG`)
+- Fills the body copy and the **"Search for …"** button with the failing host / bare term (host minus `www.` and TLD)
+- Wires the three CTAs and starts the AVD
+
+### Routing — important ordering
+
+In `onReceivedError`, **check offline first**: a DNS failure while the device has no network is really an offline problem, so route that to the no-internet screen. Only show site-not-found when there *is* a network but the host won't resolve:
+
+```kotlin
+val offline = connectivityManager.activeNetwork == null
+when {
+    offline -> showOffline(failingUrl)
+    error.errorCode == ERROR_HOST_LOOKUP -> showSiteNotFound(failingUrl)
+    else -> { /* default WebView error or a generic state */ }
+}
+```
+
+Guard on `request.isForMainFrame` so a failed sub-resource (an image, an ad the blocker killed) never triggers the full-screen takeover.
+
+---
+
+
 
 Animated offline state shown when `ConnectivityManager.activeNetwork == null` or `WebViewClient.onReceivedError` fires with `ERR_INTERNET_DISCONNECTED`. Replaces the WebView in `web_container` until the user taps Try Again.
 

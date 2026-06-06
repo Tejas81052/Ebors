@@ -19,8 +19,8 @@ android {
         applicationId = "me.thimmaiah.ebors"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,6 +75,7 @@ dependencies {
     implementation(libs.androidx.swiperefreshlayout)
     implementation(libs.okhttp)
     implementation(libs.androidx.webkit)
+    implementation(libs.zxing.embedded)
     testImplementation(libs.junit)
     // Real org.json on the unit-test classpath. Without this, the stubbed
     // org.json in the unit-test android.jar throws "Stub!" the moment

@@ -10,6 +10,7 @@
     android:paddingEnd="14dp">
 
     <ImageView
+        android:id="@+id/suggestion_icon"
         android:layout_width="34dp"
         android:layout_height="34dp"
         android:background="@drawable/bg_menu_icon_box"

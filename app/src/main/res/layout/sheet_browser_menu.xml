@@ -98,7 +98,7 @@
                     <ImageView
                         android:id="@+id/menu_save_icon"
                         style="@style/BrowserMenuQuickIcon"
-                        android:src="@drawable/ic_bookmark_outline_24"
+                        android:src="@drawable/ic_bookmark_add_24"
                         app:tint="?attr/browserAccent" />
 
                     <TextView
@@ -223,6 +223,36 @@
                         style="@style/BrowserMenuQuickLabel"
                         android:text="@string/menu_print_pdf" />
                 </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_translate"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_translate_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/action_translate" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/menu_offline"
+                    style="@style/BrowserMenuQuickActionScroll"
+                    android:layout_marginStart="10dp">
+
+                    <ImageView
+                        style="@style/BrowserMenuQuickIcon"
+                        android:src="@drawable/ic_offline_24"
+                        app:tint="@color/browser_icon" />
+
+                    <TextView
+                        style="@style/BrowserMenuQuickLabel"
+                        android:text="@string/action_save_offline" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </HorizontalScrollView>
@@ -263,6 +293,32 @@
 
             <TextView
                 android:id="@+id/menu_downloads_summary"
+                style="@style/BrowserMenuListSummary" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/BrowserMenuChevron"
+            android:src="@drawable/ic_chevron_right_24"
+            app:tint="@color/browser_hint" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/menu_saved_pages"
+        style="@style/BrowserMenuListRow">
+
+        <ImageView
+            style="@style/BrowserMenuListIcon"
+            android:src="@drawable/ic_offline_24"
+            app:tint="@color/browser_icon" />
+
+        <LinearLayout style="@style/BrowserMenuListText">
+
+            <TextView
+                style="@style/BrowserMenuListTitle"
+                android:text="@string/saved_pages_title" />
+
+            <TextView
+                android:id="@+id/menu_saved_pages_summary"
                 style="@style/BrowserMenuListSummary" />
         </LinearLayout>
 

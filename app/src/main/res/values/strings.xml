@@ -6,6 +6,23 @@
     <string name="back_button">Go back</string>
     <string name="forward_button">Go forward</string>
     <string name="refresh_button">Refresh page</string>
+    <string name="qr_scan_button">Scan QR code</string>
+    <string name="qr_scan_prompt">Point the camera at a QR code or barcode</string>
+    <string name="qr_scan_unavailable">Camera not available for scanning</string>
+    <string name="action_translate">Translate</string>
+    <string name="translate_not_available">Open a web page first to translate it</string>
+    <string name="translate_already">This page is already translated</string>
+    <string name="action_save_offline">Offline</string>
+    <string name="saved_pages_title">Saved pages</string>
+    <string name="saved_pages_summary">%1$d saved for offline reading</string>
+    <string name="offline_saving">Saving for offline…</string>
+    <string name="offline_saved">Saved for offline reading</string>
+    <string name="offline_save_failed">Couldn\'t save this page</string>
+    <string name="offline_save_not_eligible">This page can\'t be saved for offline reading</string>
+    <string name="offline_empty">No saved pages yet. Use Offline on an article to save it.</string>
+    <string name="offline_open_failed">Couldn\'t open this saved page</string>
+    <string name="offline_clear_all">Clear all</string>
+    <string name="offline_cleared">Saved pages cleared</string>
     <string name="home_button">Open home</string>
     <string name="browser_menu">Menu</string>
     <string name="browser_menu_page_title">For this page</string>
@@ -65,6 +82,8 @@
     <string name="security_indicator_secure">Connection is secure</string>
     <string name="security_indicator_insecure">Connection is not secure</string>
     <string name="insecure_page_warning">This page is loaded over HTTP and is not encrypted.</string>
+    <string name="insecure_leave_action">Leave</string>
+    <string name="private_tab_indicator">Private tab</string>
 
     <string name="download_prompt_title">Start download?</string>
     <string name="download_prompt_message">Download %1$s?</string>
@@ -129,8 +148,6 @@
 
     <string name="setting_desktop_mode_title">Desktop site</string>
     <string name="setting_desktop_mode_summary">Use a desktop user agent and viewport.</string>
-    <string name="setting_force_dark_title">Dark mode</string>
-    <string name="setting_force_dark_summary">Use a dark theme across the app and web pages. On by default; turn off for a light theme.</string>
     <string name="setting_search_engine_title">Default search engine</string>
     <string name="setting_ad_block_title">Block ads &amp; trackers</string>
     <string name="setting_ad_block_summary">Filter known ad networks and tracking pixels.</string>
@@ -175,12 +192,17 @@
     <string name="setting_third_party_cookies_summary">Required for most federated sign-in (Google, Microsoft, Apple).</string>
     <string name="setting_history_title">Save browsing history</string>
     <string name="setting_history_summary">Record visited pages locally so you can find them later.</string>
+    <string name="setting_search_suggestions_title">Search suggestions</string>
+    <string name="setting_search_suggestions_summary">Show live suggestions from your search engine as you type. Sends the typed text to the engine.</string>
+    <string name="suggestion_search_label">Search</string>
     <string name="setting_javascript_title">JavaScript</string>
     <string name="setting_javascript_summary">Most modern sites need this. Turn off for a plain-HTML web.</string>
     <string name="setting_block_popups_title">Block popups</string>
     <string name="setting_block_popups_summary">Stop sites from opening new windows. May break some sign-in flows.</string>
     <string name="setting_tab_sleeping_title">Sleep inactive tabs</string>
     <string name="setting_tab_sleeping_summary">Free memory by unloading tabs left unused for a few minutes; they reload when you return.</string>
+    <string name="setting_clear_data_on_exit_title">Auto-delete on exit</string>
+    <string name="setting_clear_data_on_exit_summary">Clear cookies, cache, history and site data every time you close the browser.</string>
     <string name="setting_always_https_title">Always use HTTPS</string>
     <string name="setting_always_https_summary">Upgrade http:// links to https:// automatically. Localhost and private network addresses are not upgraded.</string>
     <string name="setting_allow_mixed_content_title">Allow mixed content</string>
@@ -309,6 +331,7 @@
     <!-- Multi-tab UI -->
     <string name="new_tab">New tab</string>
     <string name="new_private_tab">New private tab</string>
+    <string name="new_private_tab_opened">Opened a new private tab</string>
     <string name="close_tab">Close tab</string>
     <string name="tab_private_url_prefix">Private · %1$s</string>
     <string name="private_mode_unsupported">Private tabs need a newer Android System WebView.</string>
@@ -428,6 +451,13 @@
     <string name="no_internet_stamp_eyebrow">Postage · Ebors</string>
     <string name="no_internet_try_again">Try again</string>
     <string name="no_internet_try_again_cd">Try again</string>
+
+    <!-- Site-not-found screen -->
+    <string name="site_not_found_eyebrow">Address not found</string>
+    <string name="site_not_found_title">Nobody\'s home\nat that address.</string>
+    <string name="site_not_found_body">We couldn\'t find a site at %1$s. Check the spelling, or search for it instead.</string>
+    <string name="site_not_found_back">Go back</string>
+    <string name="site_not_found_retry">Try again</string>
 
     <!--
       Perforated stamp outline (320×80 viewport). Shared by the shadow

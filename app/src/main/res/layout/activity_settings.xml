@@ -42,10 +42,6 @@
                 layout="@layout/item_settings_switch" />
 
             <include
-                android:id="@+id/row_force_dark"
-                layout="@layout/item_settings_switch" />
-
-            <include
                 android:id="@+id/row_accent"
                 layout="@layout/item_settings_accent" />
 
@@ -174,6 +170,10 @@
                 android:id="@+id/row_history"
                 layout="@layout/item_settings_switch" />
 
+            <include
+                android:id="@+id/row_search_suggestions"
+                layout="@layout/item_settings_switch" />
+
             <TextView
                 style="@style/SettingsHeader"
                 android:text="@string/settings_section_advanced" />
@@ -214,6 +214,10 @@
                         tools:text="Disabled. Tap to allow." />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
+
+            <include
+                android:id="@+id/row_clear_data_on_exit"
+                layout="@layout/item_settings_switch" />
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/row_clear_data"

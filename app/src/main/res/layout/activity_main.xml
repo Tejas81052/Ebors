@@ -92,10 +92,21 @@
             </FrameLayout>
 
             <ImageButton
+                android:id="@+id/qr_scan_button"
+                android:layout_width="40dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="2dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/qr_scan_button"
+                android:padding="9dp"
+                android:src="@drawable/ic_qr_scan_24"
+                app:tint="@color/browser_text_2" />
+
+            <ImageButton
                 android:id="@+id/refresh_button"
                 android:layout_width="40dp"
                 android:layout_height="44dp"
-                android:layout_marginStart="4dp"
+                android:layout_marginStart="2dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/refresh_button"
                 android:padding="10dp"
@@ -254,6 +265,19 @@
             <include
                 android:id="@+id/no_internet_overlay"
                 layout="@layout/activity_no_internet"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <!--
+              Animated site-not-found screen. Shown over the WebView (chrome
+              stays visible) when an online main-frame load fails with a
+              host-lookup (DNS) error; cleared on retry / navigation / tab
+              switch. Mirrors the offline overlay placement and lifecycle.
+            -->
+            <include
+                android:id="@+id/site_not_found_overlay"
+                layout="@layout/activity_site_not_found"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:visibility="gone" />

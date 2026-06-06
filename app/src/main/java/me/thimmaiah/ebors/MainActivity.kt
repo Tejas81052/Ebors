@@ -29,7 +29,6 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.http.SslError
@@ -37,12 +36,7 @@ import android.os.Bundle
 import android.os.Message
 import android.provider.Settings
 import android.text.Editable
-import android.text.SpannableString
-import android.text.SpannableStringBuilder
-import android.text.Spanned
 import android.text.TextWatcher
-import android.text.style.ForegroundColorSpan
-import android.text.style.StyleSpan
 import android.util.Log
 import android.view.ContextMenu
 import android.view.LayoutInflater
@@ -97,22 +91,16 @@ import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : AppCompatActivity() {
     private lateinit var rootView: View
     private lateinit var addressBar: AddressEditText
-    private lateinit var addressSuggestionAdapter: AddressSuggestionAdapter
-    private var addressSuggestionPopup: ListPopupWindow? = null
+    private lateinit var searchController: SearchController
+    private lateinit var chrome: BrowserChromeController
+    private lateinit var navigationController: NavigationController
     private var imeWasVisible = false
-    // Set right after the keyboard hides while editing an address bar.
-    // Predictive-back devices deliver BACK to the dispatcher in addition
-    // to hiding the keyboard; this swallows that one stray navigation so
-    // dismissing the keyboard doesn't also exit the app/close a tab.
-    private var swallowBackNav = false
-    private val clearSwallowBackNav = Runnable { swallowBackNav = false }
-
-    private var backToExitArmed = false
-    private val clearBackToExit = Runnable { backToExitArmed = false }
     private lateinit var captionView: TextView
     private lateinit var securityIndicator: ImageView
     private lateinit var webContainer: androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -130,6 +118,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchButton: ImageButton
     private lateinit var homeButton: ImageButton
     private lateinit var refreshButton: ImageButton
+    private lateinit var qrScanButton: ImageButton
     private lateinit var navigationCard: View
     private lateinit var topChrome: AppBarLayout
     private lateinit var bottomChrome: View
@@ -161,8 +150,9 @@ class MainActivity : AppCompatActivity() {
     private val findDebounceHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var findDebounceRunnable: Runnable? = null
 
-    private val tabs = mutableListOf<Tab>()
-    private var activeTabIndex: Int = -1
+    private lateinit var tabController: TabController
+    private val tabs: List<Tab> get() = tabController.tabs
+    private val activeTabIndex: Int get() = tabController.activeTabIndex
     private var tabSwitcherView: TabSwitcherView? = null
 
     private var startPageView: StartPageView? = null
@@ -173,14 +163,13 @@ class MainActivity : AppCompatActivity() {
      *  its findViewById lands after the overlay include is in the tree. */
     private val noInternetController: NoInternetController by lazy { NoInternetController(this) }
     private var offlineShowing = false
+
+    /** Drives the animated "site not found" screen (online host-lookup
+     *  failure); constructed on first show so its findViewById lands after
+     *  the overlay include is in the tree. */
+    private val siteNotFoundController: SiteNotFoundController by lazy { SiteNotFoundController(this) }
+    private var siteNotFoundShowing = false
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
-
-    private var permissionInFlightTabId: String? = null
-    private var geolocationInFlightTabId: String? = null
-
-    private var inFlightPermissionDialog: android.app.Dialog? = null
-
-    private var skipWebViewPauseForPermission = false
 
     /** Tab whose web media is currently driving the background-playback
      *  service, or null when nothing is playing. */
@@ -190,30 +179,27 @@ class MainActivity : AppCompatActivity() {
      *  keep-WebView-alive path in [onPause] so audio survives backgrounding. */
     private var backgroundMediaPlaying = false
 
-    private var fullscreenView: View? = null
-    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
-    private var fullscreenSavedOrientation: Int = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    private val fullscreenVideo = FullscreenVideoController(this)
+    private val intentRouter = IntentRouter(this, { navigationController.loadAddress(it) }, this::showToast)
+    private val downloadCoordinator by lazy {
+        DownloadCoordinator(this, rootView, navigationCard, PRIVATE_PROFILE_NAME, { baseUserAgent }, this::showToast)
+    }
 
     private lateinit var prefs: BrowserPreferences
     private var lastDesktopMode: Boolean = false
-    private var lastForceDark: Boolean = false
     private var lastBlockWebRtc: Boolean = false
     private var lastTrimReferrer: Boolean = false
 
-    private val activeTabOrNull: Tab? get() = tabs.getOrNull(activeTabIndex)
+    private val activeTabOrNull: Tab? get() = tabController.activeTabOrNull
 
-    private val multiProfileSupported: Boolean by lazy {
-        WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
-    }
-
-    private val activeTab: Tab get() = tabs[activeTabIndex]
+    private val activeTab: Tab get() = tabController.activeTab
 
     private val openLibraryLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 val url = result.data?.getStringExtra(BookmarksActivity.EXTRA_URL)
                 if (!url.isNullOrBlank()) {
-                    loadAddress(url)
+                    navigationController.loadAddress(url)
                 }
             }
         }
@@ -235,61 +221,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    private val websitePermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-
-            val tabId = permissionInFlightTabId
-            permissionInFlightTabId = null
-            val tab = tabs.firstOrNull { it.id == tabId } ?: return@registerForActivityResult
-            val pending = tab.pendingWebsitePermission ?: return@registerForActivityResult
-            tab.pendingWebsitePermission = null
-
-            val grantableResources = pending.resources.filter { resource ->
-                requiredAndroidPermissions(resource).all { permission ->
-                    grants[permission] == true || hasPermission(permission)
-                }
-            }
-
-            if (grantableResources.isNotEmpty()) {
-                pending.request.grant(grantableResources.toTypedArray())
-            } else {
-                pending.request.deny()
-
-                val deniedPermissions = pending.resources
-                    .flatMap(::requiredAndroidPermissions)
-                    .distinct()
-                    .filterNot(::hasPermission)
-                offerAppSettingsIfPermanentlyDenied(tab, deniedPermissions)
-            }
-        }
-
-    private val geolocationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-            val tabId = geolocationInFlightTabId
-            geolocationInFlightTabId = null
-            val tab = tabs.firstOrNull { it.id == tabId } ?: return@registerForActivityResult
-            val pending = tab.pendingGeolocation ?: return@registerForActivityResult
-            tab.pendingGeolocation = null
-
-            val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
-                hasAnyLocationPermission()
-            pending.callback.invoke(pending.origin, granted, false)
-            if (!granted) {
-                val deniedPermissions = listOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                ).filterNot(::hasPermission)
-                offerAppSettingsIfPermanentlyDenied(tab, deniedPermissions)
-            }
-        }
-
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (!granted) {
-                showToast(getString(R.string.download_notification_permission_denied))
-            }
-        }
+    private val permissionController = PermissionController(
+        activity = this,
+        findTabById = { id -> tabs.firstOrNull { it.id == id } },
+        activeTab = { activeTabOrNull },
+        showToast = this::showToast,
+    )
 
     private var pendingFileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
 
@@ -309,6 +246,21 @@ class MainActivity : AppCompatActivity() {
                 null
             }
             callback.onReceiveValue(uris)
+        }
+
+    /**
+     * QR / barcode scan launched from the address-bar scan button. A decoded
+     * URL loads directly; anything else is routed through [resolveUserInput]
+     * so plain text becomes a search. Cancelling (back/permission denied)
+     * yields a null `contents` and is a silent no-op.
+     */
+    private val qrScanLauncher =
+        registerForActivityResult(ScanContract()) { result ->
+            val contents = result.contents?.trim()
+            if (!contents.isNullOrBlank()) {
+                cancelAddressEditing()
+                navigationController.loadAddress(resolveUserInput(contents))
+            }
         }
 
     private var boundAccentKey: String = AccentTheme.DEFAULT.key
@@ -341,7 +293,6 @@ class MainActivity : AppCompatActivity() {
         this.prefs = prefs
 
         lastDesktopMode = prefs.desktopMode
-        lastForceDark = prefs.forceDark
         lastBlockWebRtc = prefs.blockWebRtc
         lastTrimReferrer = prefs.trimReferrer
 
@@ -365,21 +316,85 @@ class MainActivity : AppCompatActivity() {
             prefs.markSitePermissionsReset()
         }
 
-        wipePrivateProfileIfAny()
-
         bindViews()
+        chrome = BrowserChromeController(
+            activity = this,
+            addressBar = addressBar,
+            securityIndicator = securityIndicator,
+            captionView = captionView,
+            rootView = rootView,
+            navigationCard = navigationCard,
+            bookmarkButton = bookmarkButton,
+            searchButton = searchButton,
+            homeButton = homeButton,
+            menuButton = menuButton,
+            refreshButton = refreshButton,
+            tabsButton = tabsButton,
+            tabCountText = tabCountText,
+            prefs = prefs,
+            activeTab = { activeTabOrNull },
+            tabCount = { tabs.size },
+            onLeaveInsecurePage = { navigationController.loadAddress(homeUrl()) },
+        )
+        navigationController = NavigationController(
+            activity = this,
+            rootView = rootView,
+            addressBar = addressBar,
+            chrome = chrome,
+            fullscreenVideo = fullscreenVideo,
+            activeTab = { activeTabOrNull },
+            openTab = { tabController.openNewTab(url = it, switchTo = true) },
+            showStartPage = ::showStartPage,
+            hideStartPage = ::hideStartPage,
+            isOfflineShowing = { offlineShowing },
+            hideOfflineScreen = ::hideOfflineScreen,
+            isAddressEditing = ::isAddressEditing,
+            cancelAddressEditing = ::cancelAddressEditing,
+            dismissTabSwitcherIfShowing = {
+                if (tabSwitcherView?.isShowing() == true) {
+                    tabSwitcherView?.dismiss()
+                    true
+                } else {
+                    false
+                }
+            },
+            hideFindBarIfVisible = {
+                if (findBar.isVisible) {
+                    hideFindBar()
+                    true
+                } else {
+                    false
+                }
+            },
+            showToast = ::showToast,
+            onExit = ::finish,
+        )
+        tabController = TabController(
+            activity = this,
+            webHost = webHost,
+            prefs = prefs,
+            chrome = chrome,
+            configureWebView = ::configureWebViewForTab,
+            onActiveTabChanged = ::onActiveTabActivated,
+            mediaPlayingTab = { mediaPlayingTab },
+            stopBackgroundMedia = ::stopBackgroundMedia,
+            refreshTabSwitcher = ::refreshTabSwitcher,
+            onAllTabsClosed = ::finish,
+            showToast = ::showToast,
+        )
+        tabController.wipePrivateProfileIfAny()
         applyInsets()
         configureNavigation()
         configureFindBar()
         configureSwipeRefresh()
         configureServiceWorkerBlocker()
         configureBackHandling()
-        updateSearchEngineUi()
+        chrome.updateSearchEngineUi()
 
-        val restored = restoreTabsFrom(savedInstanceState)
+        val restored = tabController.restoreTabsFrom(savedInstanceState)
         if (!restored) {
-            val intentUrl = extractIntentUrl(intent)
-            openNewTab(url = intentUrl ?: homeUrl(), switchTo = true)
+            val intentUrl = intentRouter.extractIntentUrl(intent)
+            tabController.openNewTab(url = intentUrl ?: homeUrl(), switchTo = true)
         }
         applyPreferences()
 
@@ -394,58 +409,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         maybeShowDefaultBrowserPrompt()
-        maybeRequestNotificationPermission()
+        permissionController.maybeRequestNotificationPermission(prefs)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val url = extractIntentUrl(intent) ?: return
+        val url = intentRouter.extractIntentUrl(intent) ?: return
 
-        openNewTab(url = url, switchTo = true)
+        tabController.openNewTab(url = url, switchTo = true)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-
-        val urls = ArrayList<String>(tabs.size)
-        var restoredActiveIndex = 0
-        for ((i, tab) in tabs.withIndex()) {
-            if (tab.isPrivate) continue
-            if (i == activeTabIndex) restoredActiveIndex = urls.size
-            urls.add(tab.webView.url ?: tab.displayUrl)
-        }
-        outState.putStringArrayList(STATE_TAB_URLS, urls)
-        outState.putInt(STATE_ACTIVE_TAB_INDEX, restoredActiveIndex)
-
-        val activeTabState = Bundle()
-        val activeTab = activeTabOrNull
-        if (activeTab != null && !activeTab.isPrivate) {
-            activeTab.webView.saveState(activeTabState)
-        }
-        outState.putBundle(STATE_ACTIVE_TAB_WEBVIEW, activeTabState)
-    }
-
-    private fun restoreTabsFrom(state: Bundle?): Boolean {
-        val urls = state?.getStringArrayList(STATE_TAB_URLS) ?: return false
-        if (urls.isEmpty()) return false
-        val savedActiveIndex = state.getInt(STATE_ACTIVE_TAB_INDEX, 0)
-            .coerceIn(0, urls.size - 1)
-        val activeStateBundle = state.getBundle(STATE_ACTIVE_TAB_WEBVIEW)
-
-        for ((i, url) in urls.withIndex()) {
-
-            val tab = openNewTab(url = null, switchTo = false) ?: return false
-            tab.displayUrl = url
-            if (i == savedActiveIndex && activeStateBundle != null) {
-                tab.webView.restoreState(activeStateBundle)
-                tab.pendingLoadUrl = null
-            } else if (url.isNotBlank()) {
-                tab.pendingLoadUrl = url
-            }
-        }
-        switchToTab(savedActiveIndex)
-        return true
+        tabController.saveState(outState)
     }
 
     override fun onPause() {
@@ -455,35 +432,33 @@ class MainActivity : AppCompatActivity() {
         // masked its own visibility when playback started so it won't
         // auto-pause. skipWebViewPauseForPermission covers the runtime
         // permission round-trip.
-        if (!backgroundMediaPlaying && !skipWebViewPauseForPermission) {
-            if (tabs.isNotEmpty()) tabs[0].webView.pauseTimers()
-            for (tab in tabs) tab.webView.onPause()
+        if (!backgroundMediaPlaying && !permissionController.skipWebViewPauseForPermission) {
+            tabController.pauseWebViews()
         }
         if (offlineShowing) noInternetController.stopAnimations()
+        if (siteNotFoundShowing) siteNotFoundController.stopAnimations()
         unregisterNetworkCallback()
-        tabSleepHandler.removeCallbacks(tabSleepChecker)
+        tabController.stopSleepTimer()
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
 
-        skipWebViewPauseForPermission = false
+        permissionController.skipWebViewPauseForPermission = false
 
         if (prefs.accentKey != boundAccentKey) {
             recreate()
             return
         }
-        if (tabs.isNotEmpty()) tabs[0].webView.resumeTimers()
-
-        activeTabOrNull?.webView?.onResume()
+        tabController.resumeWebViews()
         applyPreferences()
 
         if (startPageView?.isShowing() == true) startPageView?.refresh()
         if (offlineShowing) noInternetController.startAnimations()
+        if (siteNotFoundShowing) siteNotFoundController.startAnimations()
         registerNetworkCallback()
-        tabSleepHandler.removeCallbacks(tabSleepChecker)
-        tabSleepHandler.postDelayed(tabSleepChecker, TAB_SLEEP_CHECK_INTERVAL_MS)
+        tabController.startSleepTimer()
         // Recover from a reconnect that happened while backgrounded.
         if (offlineShowing && !isDeviceOffline()) onNetworkBackOnline()
     }
@@ -501,191 +476,43 @@ class MainActivity : AppCompatActivity() {
         when (level) {
             TRIM_MEMORY_RUNNING_LOW, TRIM_MEMORY_RUNNING_CRITICAL,
             TRIM_MEMORY_MODERATE, TRIM_MEMORY_COMPLETE,
-            -> discardBackgroundTabs()
-        }
-    }
-
-    /**
-     * Navigate every non-active, non-media tab to about:blank so its heavy
-     * page releases renderer memory, queuing a reload on next activation via
-     * [Tab.pendingLoadUrl] (the same path background-opened tabs already use).
-     * The foreground tab and any tab playing media are always kept intact.
-     */
-    private fun discardBackgroundTabs() {
-        val active = activeTabOrNull
-        for (tab in tabs) if (isDiscardable(tab, active)) discardTabPage(tab)
-    }
-
-    /**
-     * Proactive tab sleeping: discard tabs left untouched past
-     * [TAB_SLEEP_AFTER_MS], before memory pressure ever hits. Runs on a timer
-     * while the app is foreground, gated on [BrowserPreferences.tabSleeping].
-     */
-    private fun sleepIdleTabs() {
-        val active = activeTabOrNull
-        val now = System.currentTimeMillis()
-        for (tab in tabs) {
-            if (isDiscardable(tab, active) && now - tab.lastActiveAt >= TAB_SLEEP_AFTER_MS) {
-                discardTabPage(tab)
-            }
-        }
-    }
-
-    /** A tab is discardable when it isn't the foreground tab, isn't driving
-     *  media, isn't already discarded/deferred, and holds a real page. */
-    private fun isDiscardable(tab: Tab, active: Tab?): Boolean {
-        if (tab === active || tab === mediaPlayingTab) return false
-        if (tab.pendingLoadUrl != null) return false
-        val url = tab.displayUrl
-        return url.isNotBlank() && url != ABOUT_HOME_URL && url != ABOUT_BLANK_URL
-    }
-
-    /** Park [tab] on about:blank to free its renderer memory, remembering its
-     *  URL so switchToTab reloads it on reactivation. */
-    private fun discardTabPage(tab: Tab) {
-        tab.pendingLoadUrl = tab.displayUrl
-        tab.webView.loadUrl(ABOUT_BLANK_URL)
-    }
-
-    private val tabSleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val tabSleepChecker = object : Runnable {
-        override fun run() {
-            if (prefs.tabSleeping) sleepIdleTabs()
-            tabSleepHandler.postDelayed(this, TAB_SLEEP_CHECK_INTERVAL_MS)
+            -> tabController.discardBackgroundTabs()
         }
     }
 
     override fun onDestroy() {
-        exitFullscreen()
+        fullscreenVideo.exit()
+        // Auto-delete on exit: only when the task is genuinely finishing
+        // (back-to-exit / removed from recents), never on a transient
+        // config-change teardown. Runs while tabs are still alive so each
+        // WebView's cache can be cleared before destroy().
+        if (isFinishing && prefs.clearDataOnExit) wipeBrowsingDataOnExit()
         if (offlineShowing) noInternetController.stopAnimations()
+        if (siteNotFoundShowing) siteNotFoundController.stopAnimations()
         // Tabs are torn down below, so any web media is gone — release the
         // session/notification and stop masking transport actions.
         MediaPlaybackService.transportCallback = null
         stopBackgroundMedia()
-        permissionInFlightTabId = null
-        geolocationInFlightTabId = null
-        inFlightPermissionDialog = null
+        permissionController.clearInFlight()
 
         findDebounceHandler.removeCallbacksAndMessages(null)
         findDebounceRunnable = null
 
         inactivityHandler.removeCallbacksAndMessages(null)
-        tabSleepHandler.removeCallbacksAndMessages(null)
+        searchController.cancelPending()
 
         speechActive = false
         destroySpeechRecognizer()
-        val hadPrivateTabs = tabs.any { it.isPrivate }
-
-        val activeTab = activeTabOrNull
-        if (activeTab != null) {
-            webHost.removeView(activeTab.webView)
-        }
-
-        for (tab in tabs.reversed()) {
-            tab.destroy()
-        }
-        tabs.clear()
-        activeTabIndex = -1
+        tabController.destroyAll()
         tabSwitcherView?.dismiss()
         tabSwitcherView = null
-
-        if (hadPrivateTabs) {
-            wipePrivateProfileIfAny()
-        }
         super.onDestroy()
     }
 
-    private fun openNewTab(
-        url: String?,
-        switchTo: Boolean = true,
-        isPrivate: Boolean = false,
-    ): Tab? {
-        val newWebView = ScrollAwareWebView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-        }
-
-        var privateProfileBound = false
-        if (isPrivate && multiProfileSupported) {
-            try {
-                WebViewCompat.setProfile(newWebView, PRIVATE_PROFILE_NAME)
-                privateProfileBound = true
-            } catch (e: Exception) {
-                Log.w(
-                    "MainActivity",
-                    "Profile binding failed; private tab was not opened",
-                    e,
-                )
-                showToast(getString(R.string.private_mode_unsupported))
-                newWebView.destroy()
-                return null
-            }
-        } else if (isPrivate) {
-            showToast(getString(R.string.private_mode_unsupported))
-            newWebView.destroy()
-            return null
-        }
-        val tab = Tab(newWebView, isPrivate = privateProfileBound)
-        tabs.add(tab)
-        configureWebViewForTab(tab)
-
-        if (!url.isNullOrBlank()) {
-            tab.displayUrl = url
-        }
-
-        val isHome = url == ABOUT_HOME_URL
-        if (switchTo) {
-            if (!url.isNullOrBlank() && !isHome) {
-                newWebView.loadUrl(url)
-            }
-            switchToTab(tabs.size - 1)
-        } else {
-            tab.pendingLoadUrl = url?.takeUnless { it.isBlank() || isHome }
-            newWebView.onPause()
-            if (tabSwitcherView?.isShowing() == true) {
-                tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
-            }
-        }
-
-        updateNavigationButtons()
-        return tab
-    }
-
-    private fun switchToTab(index: Int) {
-        val target = tabs.getOrNull(index) ?: return
-
-        if (index == activeTabIndex && webHost.indexOfChild(target.webView) >= 0) {
-            return
-        }
-        val previousActive = if (activeTabIndex in tabs.indices) tabs[activeTabIndex] else null
-
-        previousActive?.let {
-
-            it.lastActiveAt = System.currentTimeMillis()
-            it.captureThumbnail()
-            webHost.removeView(it.webView)
-            it.webView.onPause()
-        }
-
-        webHost.addView(target.webView)
-        target.webView.onResume()
-        activeTabIndex = index
-
-        target.pendingLoadUrl?.let { deferredUrl ->
-            target.pendingLoadUrl = null
-            target.webView.loadUrl(deferredUrl)
-        }
-
-        if (target.pendingReloadOnActivate && target.pendingLoadUrl == null) {
-            target.pendingReloadOnActivate = false
-            if (target.webView.url != null) target.webView.reload()
-        } else if (target.pendingReloadOnActivate) {
-
-            target.pendingReloadOnActivate = false
-        }
-
+    /** UI sync after the active tab changes: start page vs. web, address bar,
+     *  security indicator, caption, nav buttons, find bar, offline overlay,
+     *  chrome reset and shorts layout. Funnelled here from [TabController]. */
+    private fun onActiveTabActivated(target: Tab) {
         val targetIsHome = target.displayUrl == ABOUT_HOME_URL
         if (targetIsHome) {
             showStartPage()
@@ -695,12 +522,12 @@ class MainActivity : AppCompatActivity() {
 
         if (targetIsHome) {
             addressBar.setText("")
-            updateSecurityIndicator(null)
+            chrome.updateSecurityIndicator(null)
         } else {
-            updateAddressBar(target.webView.url ?: target.displayUrl.takeIf { it.isNotBlank() })
+            chrome.updateAddressBar(target.webView.url ?: target.displayUrl.takeIf { it.isNotBlank() })
         }
-        renderBrowserCaption(SearchEngineResolver.displayName(prefs), target.isPrivate)
-        updateNavigationButtons()
+        chrome.renderBrowserCaption(target.isPrivate)
+        chrome.updateNavigationButtons()
 
         hideFindBar()
         // The offline overlay is a shared surface: re-decide whether it
@@ -709,64 +536,16 @@ class MainActivity : AppCompatActivity() {
         evaluateOfflineForActiveTab()
         scrollDirAccumPx = 0
         setChromeHidden(false)
-
         scheduleAutoHide()
-
         refreshSuppressedByJs = false
 
         val newUrl = target.webView.url.orEmpty()
         applyShortsLayout(isYouTubeHost(newUrl) && newUrl.contains("/shorts/"))
     }
 
-    private fun closeTab(index: Int) {
-        val tab = tabs.getOrNull(index) ?: return
-        val wasActive = index == activeTabIndex
-        val wasPrivate = tab.isPrivate
-
-        if (tab === mediaPlayingTab) stopBackgroundMedia()
-
-        if (wasActive) {
-            webHost.removeView(tab.webView)
-        }
-        tabs.removeAt(index)
-        tab.destroy()
-
-        if (wasPrivate && tabs.none { it.isPrivate }) {
-            wipePrivateProfileIfAny()
-        }
-
-        if (tabs.isEmpty()) {
-
-            finish()
-            return
-        }
-
-        if (wasActive) {
-            val newIndex = index.coerceAtMost(tabs.size - 1)
-
-            activeTabIndex = -1
-            switchToTab(newIndex)
-        } else if (index < activeTabIndex) {
-            activeTabIndex--
-        }
-
+    private fun refreshTabSwitcher() {
         if (tabSwitcherView?.isShowing() == true) {
-            tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
-        }
-
-        updateNavigationButtons()
-    }
-
-    private fun wipePrivateProfileIfAny() {
-        if (!multiProfileSupported) return
-        try {
-            val store = ProfileStore.getInstance()
-
-            if (PRIVATE_PROFILE_NAME in store.allProfileNames) {
-                store.deleteProfile(PRIVATE_PROFILE_NAME)
-            }
-        } catch (e: Exception) {
-            Log.w("MainActivity", "Failed to delete private profile", e)
+            tabSwitcherView?.refresh(tabController.buildTabSnapshots(), activeTabIndex)
         }
     }
 
@@ -788,7 +567,7 @@ class MainActivity : AppCompatActivity() {
         setTabSwitcherActiveIndicator(active = true)
 
         cancelAutoHide()
-        view.show(buildTabSnapshots(), activeTabIndex)
+        view.show(tabController.buildTabSnapshots(), activeTabIndex)
     }
 
     private fun setTabSwitcherActiveIndicator(active: Boolean) {
@@ -805,7 +584,7 @@ class MainActivity : AppCompatActivity() {
 
     private val startPageListener = object : StartPageView.Listener {
         override fun onStartPageUrlTapped(url: String) {
-            loadAddress(url)
+            navigationController.loadAddress(url)
         }
 
         override fun onStartPageQuerySubmitted(query: String) {
@@ -813,7 +592,7 @@ class MainActivity : AppCompatActivity() {
             val text = query.trim()
             if (text.isEmpty()) return
             hideImeForcefully()
-            loadAddress(resolveUserInput(text))
+            navigationController.loadAddress(resolveUserInput(text))
         }
 
         override fun onStartPageEditPinned() {
@@ -827,22 +606,22 @@ class MainActivity : AppCompatActivity() {
 
     private val privateStartPageListener = object : PrivateStartPageView.StartPageListener {
         override fun onStartPageUrlTapped(url: String) {
-            loadAddress(url)
+            navigationController.loadAddress(url)
         }
 
         override fun onStartPageQuerySubmitted(query: String) {
             val text = query.trim()
             if (text.isEmpty()) return
             hideImeForcefully()
-            loadAddress(resolveUserInput(text))
+            navigationController.loadAddress(resolveUserInput(text))
         }
     }
 
     private val tabSwitcherListener = object : TabSwitcherView.Listener {
-        override fun onSwitchToTab(id: String) = switchToTabById(id)
-        override fun onCloseTab(id: String) = closeTabById(id)
+        override fun onSwitchToTab(id: String) = tabController.switchToTabById(id)
+        override fun onCloseTab(id: String) = tabController.closeTabById(id)
         override fun onNewTab(isPrivate: Boolean) {
-            openNewTab(url = homeUrl(), switchTo = true, isPrivate = isPrivate)
+            tabController.openNewTab(url = homeUrl(), switchTo = true, isPrivate = isPrivate)
         }
         override fun onSwitcherClosed() {
 
@@ -850,33 +629,6 @@ class MainActivity : AppCompatActivity() {
             setTabSwitcherActiveIndicator(active = false)
 
             scheduleAutoHide()
-        }
-    }
-
-    private fun switchToTabById(id: String) {
-        val index = tabs.indexOfFirst { it.id == id }
-        if (index >= 0) switchToTab(index)
-    }
-
-    private fun closeTabById(id: String) {
-        val index = tabs.indexOfFirst { it.id == id }
-        if (index >= 0) closeTab(index)
-    }
-
-    private fun buildTabSnapshots(): List<TabSwitcherView.TabSnapshot> {
-        return tabs.map { tab ->
-
-            val displayTitle = tab.displayTitle.ifBlank { tab.webView.title.orEmpty() }
-            val displayUrl = tab.displayUrl.ifBlank { tab.webView.url.orEmpty() }
-                .ifBlank { tab.pendingLoadUrl.orEmpty() }
-            TabSwitcherView.TabSnapshot(
-                id = tab.id,
-                title = displayTitle,
-                url = displayUrl,
-                isPrivate = tab.isPrivate,
-
-                thumbnail = tab.thumbnail,
-            )
         }
     }
 
@@ -897,6 +649,7 @@ class MainActivity : AppCompatActivity() {
         searchButton = findViewById(R.id.search_button)
         homeButton = findViewById(R.id.home_button)
         refreshButton = findViewById(R.id.refresh_button)
+        qrScanButton = findViewById(R.id.qr_scan_button)
         navigationCard = findViewById(R.id.navigation_card)
         topChrome = findViewById(R.id.top_chrome)
         bottomChrome = findViewById(R.id.bottom_chrome)
@@ -948,7 +701,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun onKeyboardHidden() {
         val wasEditing = isAddressEditing()
-        dismissAddressSuggestions()
+        searchController.dismiss()
         if (addressBar.hasFocus()) addressBar.clearFocus()
         startPageView?.onKeyboardHidden()
         privateStartPageView?.onKeyboardHidden()
@@ -957,20 +710,18 @@ class MainActivity : AppCompatActivity() {
         // stray back doesn't navigate/exit. The window is short enough
         // that a deliberate second press still navigates.
         if (wasEditing) {
-            swallowBackNav = true
-            rootView.removeCallbacks(clearSwallowBackNav)
-            rootView.postDelayed(clearSwallowBackNav, BACK_NAV_SWALLOW_WINDOW_MS)
+            navigationController.armBackSwallow()
         }
     }
 
     private fun isAddressEditing(): Boolean =
         addressBar.hasFocus() ||
-            addressSuggestionPopup?.isShowing == true ||
+            searchController.isShowing ||
             startPageView?.isEditing() == true ||
             privateStartPageView?.isEditing() == true
 
     private fun cancelAddressEditing() {
-        dismissAddressSuggestions()
+        searchController.dismiss()
         addressBar.clearFocus()
         hideImeForcefully()
         startPageView?.onKeyboardHidden()
@@ -985,10 +736,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configureNavigation() {
-        configureAddressSuggestions()
+        searchController = SearchController(this, addressBar, rootView, prefs, { navigationController.loadAddress(it) }, this::resolveUserInput)
+        searchController.configure()
 
         goButton.setOnClickListener {
-            submitAddressBarInput()
+            searchController.submit()
         }
 
         menuButton.setOnClickListener {
@@ -1001,7 +753,7 @@ class MainActivity : AppCompatActivity() {
                 event.action == KeyEvent.ACTION_DOWN
 
             if (actionId == EditorInfo.IME_ACTION_GO || pressedEnter) {
-                submitAddressBarInput()
+                searchController.submit()
                 true
             } else {
                 false
@@ -1013,7 +765,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
                 if (addressBar.hasFocus()) {
-                    refreshAddressSuggestions(s?.toString().orEmpty())
+                    searchController.refresh(s?.toString().orEmpty())
                 }
             }
         })
@@ -1022,18 +774,18 @@ class MainActivity : AppCompatActivity() {
             if (hasFocus) {
 
                 cancelAutoHide()
-                addressBar.setText(currentAddressUrl())
+                addressBar.setText(navigationController.currentAddressUrl())
                 addressBar.post {
                     addressBar.selectAll()
-                    refreshAddressSuggestions("")
+                    searchController.refresh("")
                 }
             } else {
                 addressBar.postDelayed({
                     if (!addressBar.hasFocus()) {
-                        dismissAddressSuggestions()
+                        searchController.dismiss()
                     }
                 }, ADDRESS_SUGGESTION_DISMISS_DELAY_MS)
-                renderAddressBar(currentAddressUrl())
+                chrome.renderAddressBar(navigationController.currentAddressUrl())
 
                 scheduleAutoHide()
             }
@@ -1048,6 +800,20 @@ class MainActivity : AppCompatActivity() {
             showTabSwitcher()
         }
 
+        // Dedicated incognito shortcut: long-press the tabs button to jump
+        // straight into a fresh private tab (mirrors the menu action but
+        // one gesture from anywhere).
+        tabsButton.setOnLongClickListener {
+            if (tabController.multiProfileSupported) {
+                tabSwitcherView?.dismiss()
+                tabController.openNewTab(url = homeUrl(), switchTo = true, isPrivate = true)
+                showToast(getString(R.string.new_private_tab_opened))
+            } else {
+                showToast(getString(R.string.private_mode_unsupported))
+            }
+            true
+        }
+
         searchButton.setOnClickListener {
             tabSwitcherView?.dismiss()
             addressBar.requestFocus()
@@ -1058,113 +824,18 @@ class MainActivity : AppCompatActivity() {
 
         homeButton.setOnClickListener {
             tabSwitcherView?.dismiss()
-            loadAddress(homeUrl())
+            navigationController.loadAddress(homeUrl())
         }
 
         refreshButton.setOnClickListener {
             activeTabOrNull?.webView?.reload()
         }
 
-        updateNavigationButtons()
-    }
-
-    private fun configureAddressSuggestions() {
-        addressSuggestionAdapter = AddressSuggestionAdapter(this)
-        // Dismiss the dropdown on BACK (older devices). Focus + keyboard +
-        // navigation are handled by the IME-inset listener / back
-        // dispatcher so we don't race them.
-        addressBar.onBackPreIme = { dismissAddressSuggestions() }
-        addressSuggestionPopup = ListPopupWindow(this).apply {
-            setAdapter(addressSuggestionAdapter)
-            setBackgroundDrawable(ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_address_suggestions))
-            setOnItemClickListener { _, _, position, _ ->
-                val entry = addressSuggestionAdapter.getItem(position) ?: return@setOnItemClickListener
-                dismissAddressSuggestions()
-                addressBar.clearFocus()
-                hideKeyboard(addressBar)
-                loadAddress(entry.url)
-            }
+        qrScanButton.setOnClickListener {
+            launchQrScanner()
         }
-    }
 
-    private fun submitAddressBarInput() {
-        val resolved = resolveUserInput(addressBar.text?.toString().orEmpty())
-        dismissAddressSuggestions()
-        addressBar.clearFocus()
-        hideKeyboard(addressBar)
-        loadAddress(resolved)
-    }
-
-    private fun refreshAddressSuggestions(query: String) {
-        val suggestions = buildAddressSuggestions(query)
-        addressSuggestionAdapter.submit(suggestions)
-        if (suggestions.isEmpty()) {
-            dismissAddressSuggestions()
-        } else {
-            showAddressSuggestions()
-        }
-    }
-
-    private fun showAddressSuggestions() {
-        val popup = addressSuggestionPopup ?: return
-        if (!addressBar.hasFocus() || addressBar.windowToken == null) return
-
-        val anchor = addressSuggestionAnchor()
-        val gutter = dp(8)
-        val screenWidth = rootView.width.takeIf { it > 0 } ?: anchor.width
-        val targetWidth = (screenWidth - gutter * 2).coerceAtLeast(dp(260))
-
-        val anchorLocation = IntArray(2)
-        anchor.getLocationOnScreen(anchorLocation)
-        val rootLocation = IntArray(2)
-        rootView.getLocationOnScreen(rootLocation)
-        val anchorScreenLeft = anchorLocation[0]
-        val rootScreenLeft = rootLocation[0]
-        val targetLeft = rootScreenLeft + gutter
-        popup.setAnchorView(anchor)
-        popup.width = targetWidth
-        popup.height = ViewGroup.LayoutParams.WRAP_CONTENT
-        popup.horizontalOffset = targetLeft - anchorScreenLeft
-        popup.verticalOffset = dp(6)
-        if (!popup.isShowing) {
-            popup.show()
-        }
-    }
-
-    private fun dismissAddressSuggestions() {
-        addressSuggestionPopup?.dismiss()
-    }
-
-    private fun buildAddressSuggestions(query: String): List<HistoryEntry> {
-        val needle = query.trim().lowercase()
-        val seen = HashSet<String>()
-        return HistoryRepository.snapshot().asSequence()
-            .filter { entry ->
-                if (needle.isBlank()) {
-                    true
-                } else {
-                    entry.title.lowercase().contains(needle) ||
-                        entry.url.lowercase().contains(needle) ||
-                        (Uri.parse(entry.url).host?.lowercase()?.contains(needle) == true)
-                }
-            }
-            .filter { seen.add(UrlInputUtils.canonicalForCompare(it.url)) }
-            .take(ADDRESS_SUGGESTION_LIMIT)
-            .toList()
-    }
-
-    private fun addressSuggestionAnchor(): View {
-        return (addressBar.parent as? View) ?: addressBar
-    }
-
-    private fun currentAddressUrl(): String {
-        val tab = activeTabOrNull ?: return ""
-        return tab.webView.url ?: tab.displayUrl.takeIf { it.isNotBlank() }.orEmpty()
-    }
-
-    private fun hideKeyboard(view: View) {
-        getSystemService<InputMethodManager>()
-            ?.hideSoftInputFromWindow(view.windowToken, 0)
+        chrome.updateNavigationButtons()
     }
 
     private fun configureFindBar() {
@@ -1365,12 +1036,12 @@ class MainActivity : AppCompatActivity() {
                     emitSpeechEnd()
                     return@runOnUiThread
                 }
-                if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                if (permissionController.hasPermission(Manifest.permission.RECORD_AUDIO)) {
                     beginSpeechRecognition(lang.orEmpty(), continuous, interim)
                 } else {
                     pendingSpeechStart = Triple(lang.orEmpty(), continuous, interim)
 
-                    skipWebViewPauseForPermission = true
+                    permissionController.skipWebViewPauseForPermission = true
                     speechAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
@@ -1563,7 +1234,7 @@ class MainActivity : AppCompatActivity() {
         target.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
 
             if (tab !== activeTabOrNull) return@setDownloadListener
-            handleDownloadRequest(
+            downloadCoordinator.handleDownloadRequest(
                 tab = tab,
                 url = url,
                 userAgent = userAgent,
@@ -1608,14 +1279,14 @@ class MainActivity : AppCompatActivity() {
 
                     if (!url.isNullOrBlank()) {
                         addLinkContextMenuItems(menu, url)
-                        addSaveImageItem(menu, tab)
+                        downloadCoordinator.addSaveImageItem(menu, tab)
                     }
                 }
 
                 WebView.HitTestResult.IMAGE_TYPE -> {
                     if (!url.isNullOrBlank()) {
                         addImageContextMenuItems(menu, url)
-                        addSaveImageItem(menu, tab)
+                        downloadCoordinator.addSaveImageItem(menu, tab)
                     }
                 }
 
@@ -1638,6 +1309,10 @@ class MainActivity : AppCompatActivity() {
             }
             safeBrowsingEnabled = true
             loadsImagesAutomatically = true
+            // Reuse the HTTP cache when entries are still fresh; only hit the
+            // network for expired/absent resources. Speeds up repeat visits
+            // and heavy sites without serving stale pages.
+            cacheMode = WebSettings.LOAD_DEFAULT
 
             mediaPlaybackRequiresUserGesture = false
             displayZoomControls = false
@@ -1659,7 +1334,7 @@ class MainActivity : AppCompatActivity() {
             View.IMPORTANT_FOR_AUTOFILL_YES_EXCLUDE_DESCENDANTS
         }
 
-        applyForceDark(target)
+        applyWebDarkening(target)
         syncDocumentStartScripts(tab)
 
         target.webChromeClient = object : WebChromeClient() {
@@ -1672,7 +1347,7 @@ class MainActivity : AppCompatActivity() {
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 tab.displayTitle = title.orEmpty()
                 if (tab === activeTabOrNull && tabSwitcherView?.isShowing() == true) {
-                    tabSwitcherView?.refresh(buildTabSnapshots(), activeTabIndex)
+                    tabSwitcherView?.refresh(tabController.buildTabSnapshots(), activeTabIndex)
                 }
             }
 
@@ -1688,27 +1363,18 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPermissionRequest(request: PermissionRequest?) {
                 if (request == null) return
-                runOnUiThread { handleWebsitePermissionRequest(tab, request) }
+                runOnUiThread { permissionController.handleWebsitePermissionRequest(tab, request) }
             }
 
             override fun onPermissionRequestCanceled(request: PermissionRequest?) {
-
-                if (tab.pendingWebsitePermission?.request == request) {
-                    tab.pendingWebsitePermission = null
-                    if (permissionInFlightTabId == tab.id) permissionInFlightTabId = null
-                } else if (permissionInFlightTabId == tab.id && tab.pendingWebsitePermission == null) {
-
-                    permissionInFlightTabId = null
-                    inFlightPermissionDialog?.dismiss()
-                    inFlightPermissionDialog = null
-                }
+                permissionController.handlePermissionRequestCanceled(tab, request)
             }
 
             override fun onGeolocationPermissionsShowPrompt(
                 origin: String?,
                 callback: GeolocationPermissions.Callback?,
             ) {
-                runOnUiThread { handleGeolocationPermissionRequest(tab, origin, callback) }
+                runOnUiThread { permissionController.handleGeolocationPermissionRequest(tab, origin, callback) }
             }
 
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
@@ -1717,11 +1383,11 @@ class MainActivity : AppCompatActivity() {
                     callback?.onCustomViewHidden()
                     return
                 }
-                enterFullscreen(view, callback)
+                fullscreenVideo.enter(view, callback)
             }
 
             override fun onHideCustomView() {
-                exitFullscreen()
+                fullscreenVideo.exit()
             }
 
             override fun onShowFileChooser(
@@ -1776,7 +1442,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (!isUserGesture) return false
 
-                val newTab = openNewTab(url = null, switchTo = true) ?: return false
+                val newTab = tabController.openNewTab(url = null, switchTo = true) ?: return false
                 val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
                 transport.webView = newTab.webView
                 resultMsg.sendToTarget()
@@ -1785,8 +1451,8 @@ class MainActivity : AppCompatActivity() {
 
             override fun onCloseWindow(window: WebView?) {
                 if (window == null) return
-                val idx = tabs.indexOfFirst { it.webView === window }
-                if (idx >= 0) closeTab(idx)
+                val tab = tabs.firstOrNull { it.webView === window } ?: return
+                tabController.closeTabById(tab.id)
             }
         }
 
@@ -1801,7 +1467,7 @@ class MainActivity : AppCompatActivity() {
                     return handleBlockPageAction(targetUrl)
                 }
                 if (!BrowserBlocker.isSupportedBrowserScheme(targetUrl)) {
-                    return handleExternalScheme(targetUrl)
+                    return intentRouter.handleExternalScheme(targetUrl)
                 }
 
                 if (prefs.alwaysHttps && UrlInputUtils.shouldUpgradeToHttps(targetUrl)) {
@@ -1852,11 +1518,12 @@ class MainActivity : AppCompatActivity() {
                 url?.takeUnless { it == ABOUT_BLANK_URL }?.let { tab.displayUrl = it }
                 tab.insecurePageWarningShown = false
                 tab.mainFrameErrored = false
+                tab.siteNotFoundUrl = null
 
                 refreshSuppressedByJs = false
                 if (tab === activeTabOrNull) {
-                    updateAddressBar(url)
-                    updateNavigationButtons()
+                    chrome.updateAddressBar(url)
+                    chrome.updateNavigationButtons()
                     scrollDirAccumPx = 0
                     setChromeHidden(false)
 
@@ -1881,12 +1548,16 @@ class MainActivity : AppCompatActivity() {
                     progressBar.isVisible = false
 
                     webContainer.isRefreshing = false
-                    updateAddressBar(url)
-                    updateNavigationButtons()
+                    chrome.updateAddressBar(url)
+                    chrome.updateNavigationButtons()
                     // A finish without a main-frame error means the page
-                    // actually loaded — clear any offline overlay left up
-                    // from a previous failed attempt in this tab.
-                    if (!tab.mainFrameErrored) hideOfflineScreen()
+                    // actually loaded — clear any offline / site-not-found
+                    // overlay left up from a previous failed attempt in this tab.
+                    if (!tab.mainFrameErrored) {
+                        hideOfflineScreen()
+                        tab.siteNotFoundUrl = null
+                        hideSiteNotFound()
+                    }
                 }
             }
 
@@ -1910,18 +1581,52 @@ class MainActivity : AppCompatActivity() {
                 error: WebResourceError?,
             ) {
                 super.onReceivedError(view, request, error)
-                if (request?.isForMainFrame == true) {
-                    tab.mainFrameErrored = true
-                    if (tab === activeTabOrNull) {
-                        progressBar.isVisible = false
-                        webContainer.isRefreshing = false
-                        updateNavigationButtons()
-                        // Only surface the branded offline screen when the
-                        // device genuinely has no connectivity — a per-site
-                        // failure (DNS typo, server down) while online still
-                        // shows the WebView's own error page.
-                        if (isDeviceOffline()) {
+                val failingUrl = request?.url?.toString().orEmpty()
+                // Route the error through the pure decision function so the
+                // offline-vs-site-not-found precedence lives in one tested place.
+                // WebResourceError.errorCode requires API 23+; minSdk is 29.
+                val surface = resolveErrorSurface(
+                    isForMainFrame = request?.isForMainFrame == true,
+                    isDeviceOffline = isDeviceOffline(),
+                    errorCode = error?.errorCode ?: 0,
+                )
+                when (surface) {
+                    // Sub-resource failure: leave the tab presentation unchanged
+                    // (do not even record a main-frame error).
+                    ErrorSurface.UNCHANGED -> {
+                        // no-op
+                    }
+                    // Device genuinely offline — surface the branded offline screen.
+                    ErrorSurface.OFFLINE -> {
+                        tab.mainFrameErrored = true
+                        if (tab === activeTabOrNull) {
+                            progressBar.isVisible = false
+                            webContainer.isRefreshing = false
+                            chrome.updateNavigationButtons()
                             showOfflineScreen()
+                        }
+                    }
+                    // Online host-lookup failure (DNS typo, dead host): show the
+                    // branded site-not-found screen for the active tab and record
+                    // the failing URL so a tab switch can restore it.
+                    ErrorSurface.SITE_NOT_FOUND -> {
+                        tab.mainFrameErrored = true
+                        tab.siteNotFoundUrl = failingUrl
+                        if (tab === activeTabOrNull) {
+                            progressBar.isVisible = false
+                            webContainer.isRefreshing = false
+                            chrome.updateNavigationButtons()
+                            showSiteNotFound(failingUrl)
+                        }
+                    }
+                    // Any other online main-frame error (server down, timeout):
+                    // keep the WebView's own error page — no branded overlay.
+                    ErrorSurface.DEFAULT_WEBVIEW -> {
+                        tab.mainFrameErrored = true
+                        if (tab === activeTabOrNull) {
+                            progressBar.isVisible = false
+                            webContainer.isRefreshing = false
+                            chrome.updateNavigationButtons()
                         }
                     }
                 }
@@ -1943,7 +1648,7 @@ class MainActivity : AppCompatActivity() {
         BrowserBlocker.adBlockEnabled = prefs.adBlockEnabled
         BrowserBlocker.siteBlockEnabled = prefs.siteBlockEnabled
 
-        updateSearchEngineUi()
+        chrome.updateSearchEngineUi()
 
         for (tab in tabs) {
             applyToWebView(tab)
@@ -1951,12 +1656,10 @@ class MainActivity : AppCompatActivity() {
 
         val shouldReloadTabs =
             prefs.desktopMode != lastDesktopMode ||
-                prefs.forceDark != lastForceDark ||
                 prefs.blockWebRtc != lastBlockWebRtc ||
                 prefs.trimReferrer != lastTrimReferrer
         if (shouldReloadTabs) {
             lastDesktopMode = prefs.desktopMode
-            lastForceDark = prefs.forceDark
             lastBlockWebRtc = prefs.blockWebRtc
             lastTrimReferrer = prefs.trimReferrer
 
@@ -1986,7 +1689,7 @@ class MainActivity : AppCompatActivity() {
                 WebSettings.MIXED_CONTENT_NEVER_ALLOW
             }
         }
-        applyForceDark(target)
+        applyWebDarkening(target)
         syncDocumentStartScripts(tab)
     }
 
@@ -2099,22 +1802,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun applyForceDark(target: WebView) {
-
-        if (prefs.forceDark) {
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                WebSettingsCompat.setForceDark(target.settings, WebSettingsCompat.FORCE_DARK_ON)
-            }
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-                WebSettingsCompat.setAlgorithmicDarkeningAllowed(target.settings, true)
-            }
-        } else {
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                WebSettingsCompat.setForceDark(target.settings, WebSettingsCompat.FORCE_DARK_OFF)
-            }
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-                WebSettingsCompat.setAlgorithmicDarkeningAllowed(target.settings, false)
-            }
+    private fun applyWebDarkening(target: WebView) {
+        // Web content darkening follows the system theme. Algorithmic
+        // darkening only kicks in when the app is in night mode (which now
+        // tracks the OS via MODE_NIGHT_FOLLOW_SYSTEM); FORCE_DARK_AUTO does
+        // the same on older WebView builds.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(target.settings, true)
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            WebSettingsCompat.setForceDark(target.settings, WebSettingsCompat.FORCE_DARK_AUTO)
         }
     }
 
@@ -2138,60 +1834,6 @@ class MainActivity : AppCompatActivity() {
             .replace(ANDROID_PLATFORM_REGEX, "(X11; Linux x86_64)")
             .replace(" Mobile", "")
     }
-
-    private fun enterFullscreen(view: View?, callback: WebChromeClient.CustomViewCallback?) {
-        if (view == null) {
-            callback?.onCustomViewHidden()
-            return
-        }
-        if (fullscreenView != null) {
-            callback?.onCustomViewHidden()
-            return
-        }
-        fullscreenView = view
-        fullscreenCallback = callback
-        fullscreenSavedOrientation = requestedOrientation
-
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        val decor = window.decorView as ViewGroup
-        decor.addView(
-            view,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
-        )
-        WindowCompat.getInsetsController(window, view).apply {
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            hide(WindowInsetsCompat.Type.systemBars())
-        }
-    }
-
-    private fun exitFullscreen() {
-        val view = fullscreenView ?: return
-
-        val callback = fullscreenCallback
-        val savedOrientation = fullscreenSavedOrientation
-        fullscreenView = null
-        fullscreenCallback = null
-        fullscreenSavedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        try {
-            val decor = window.decorView as ViewGroup
-            decor.removeView(view)
-        } catch (_: Exception) {
-
-        }
-        try {
-            WindowCompat.getInsetsController(window, window.decorView)
-                .show(WindowInsetsCompat.Type.systemBars())
-        } catch (_: Exception) {
-
-        }
-        callback?.onCustomViewHidden()
-        requestedOrientation = savedOrientation
-    }
-
-    private fun isInFullscreen(): Boolean = fullscreenView != null
 
     private fun onWebScroll(scrollY: Int, dy: Int) {
 
@@ -2230,7 +1872,7 @@ class MainActivity : AppCompatActivity() {
         if (addressBar.hasFocus()) return false
         if (::findBar.isInitialized && findBar.isVisible) return false
         if (tabSwitcherView?.isShowing() == true) return false
-        if (isInFullscreen()) return false
+        if (fullscreenVideo.isInFullscreen) return false
         if (activeTabOrNull == null) return false
         return true
     }
@@ -2290,384 +1932,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun configureBackHandling() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-
-                // Address-bar editing (top bar or either home-page
-                // search): cancel it rather than navigating. Catches the
-                // case where the dispatcher fires while focus is still on
-                // the field.
-                if (isAddressEditing()) {
-                    cancelAddressEditing()
-                    return
-                }
-                // The keyboard just hid from an edit and this BACK rode
-                // along with it — swallow it so we don't also exit.
-                if (swallowBackNav) {
-                    swallowBackNav = false
-                    rootView.removeCallbacks(clearSwallowBackNav)
-                    return
-                }
-                if (tabSwitcherView?.isShowing() == true) {
-                    tabSwitcherView?.dismiss()
-                    return
-                }
-                if (isInFullscreen()) {
-                    exitFullscreen()
-                    return
-                }
-                if (findBar.isVisible) {
-                    hideFindBar()
-                    return
-                }
-                // Offline screen up: dismiss it and reveal the last good
-                // page (or home) instead of leaving the overlay stranded
-                // over the failed page.
-                if (offlineShowing) {
-                    hideOfflineScreen()
-                    val offlineTab = activeTabOrNull
-                    if (offlineTab != null && offlineTab.webView.canGoBack()) {
-                        offlineTab.webView.goBack()
-                    } else {
-                        loadAddress(ABOUT_HOME_URL)
-                    }
-                    backToExitArmed = false
-                    updateNavigationButtons()
-                    return
-                }
-                val tab = activeTabOrNull
-                if (tab != null && tab.webView.canGoBack()) {
-                    tab.webView.goBack()
-                    backToExitArmed = false
-                    updateNavigationButtons()
-                    return
-                }
-                // No page history left in this tab. Each tab is an
-                // independent entity: BACK never cascades into closing
-                // other tabs. Step the tab to its home page, then require
-                // a confirmed double-press to exit the app.
-                if (tab != null && tab.displayUrl != ABOUT_HOME_URL) {
-                    loadAddress(ABOUT_HOME_URL)
-                    backToExitArmed = false
-                    return
-                }
-                if (backToExitArmed) {
-                    rootView.removeCallbacks(clearBackToExit)
-                    finish()
-                    return
-                }
-                backToExitArmed = true
-                showToast(getString(R.string.press_back_again_to_exit))
-                rootView.removeCallbacks(clearBackToExit)
-                rootView.postDelayed(clearBackToExit, BACK_TO_EXIT_WINDOW_MS)
-            }
+            override fun handleOnBackPressed() = navigationController.handleBackPressed()
         })
-    }
-
-    private fun handleDownloadRequest(
-        tab: Tab,
-        url: String,
-        userAgent: String?,
-        contentDisposition: String?,
-        mimeType: String?,
-        contentLength: Long,
-    ) {
-        if (url.startsWith("blob:", ignoreCase = true)) {
-            showToast(getString(R.string.blob_download_not_supported))
-            return
-        }
-
-        val blockingMatch = BrowserBlocker.findMatch(url)
-        if (blockingMatch != null) {
-            showToast(getString(R.string.download_blocked))
-            return
-        }
-
-        val fileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
-        val sizeLabel = if (contentLength > 0L) {
-            getString(
-                R.string.download_prompt_message_with_size,
-                fileName,
-                DownloadRepository.formatBytes(contentLength),
-            )
-        } else {
-            getString(R.string.download_prompt_message, fileName)
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.download_prompt_title)
-            .setMessage(sizeLabel)
-            .setPositiveButton(R.string.allow_once) { _, _ ->
-
-                val item = DownloadRepository.enqueueDownload(
-                    url = url,
-                    contentDisposition = contentDisposition,
-                    mimeType = mimeType,
-                    contentLengthHint = contentLength,
-                    userAgent = userAgent,
-                    referer = tab.webView.url,
-                    profileName = if (tab.isPrivate) PRIVATE_PROFILE_NAME else null,
-                )
-                DownloadService.start(this)
-                Snackbar.make(rootView, getString(R.string.download_started, item.fileName), Snackbar.LENGTH_LONG)
-                    .setAnchorView(navigationCard)
-                    .setAction(R.string.view_downloads) {
-                        openDownloadsScreen()
-                    }
-                    .show()
-            }
-            .setNegativeButton(R.string.deny) { _, _ ->
-                showToast(getString(R.string.download_denied))
-            }
-            .show()
-    }
-
-    private fun handleWebsitePermissionRequest(tab: Tab, request: PermissionRequest) {
-        if (permissionInFlightTabId != null) {
-            request.deny()
-            if (tab === activeTabOrNull) {
-                showToast(getString(R.string.permission_busy))
-            }
-            return
-        }
-
-        val supportedResources = request.resources.filter { resource ->
-            resource == PermissionRequest.RESOURCE_AUDIO_CAPTURE ||
-                resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE
-        }
-
-        if (supportedResources.isEmpty()) {
-            request.deny()
-            if (tab === activeTabOrNull) {
-                showToast(getString(R.string.website_permission_unsupported))
-            }
-            return
-        }
-
-        val rawOrigin = request.origin?.toString()
-        val kinds = supportedResources.mapNotNull(::resourceToKind).distinct()
-
-        if (!tab.isPrivate && kinds.isNotEmpty()) {
-            val decisions = kinds.map { SitePermissionStore.decisionFor(rawOrigin, it) }
-            if (decisions.all { it == SitePermissionStore.Decision.ALLOW }) {
-                grantWebsitePermission(tab, request, supportedResources)
-                return
-            }
-            if (decisions.any { it == SitePermissionStore.Decision.BLOCK }) {
-                request.deny()
-                return
-            }
-        }
-
-        val origin = extractOriginLabel(rawOrigin)
-        val requestedAccess = supportedResources.joinToString(separator = getString(R.string.permission_joiner)) {
-            when (it) {
-                PermissionRequest.RESOURCE_AUDIO_CAPTURE -> getString(R.string.microphone_permission_label)
-                PermissionRequest.RESOURCE_VIDEO_CAPTURE -> getString(R.string.camera_permission_label)
-                else -> it
-            }
-        }
-
-        permissionInFlightTabId = tab.id
-
-        inFlightPermissionDialog = MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.website_permission_title, origin))
-            .setMessage(getString(R.string.website_permission_message, origin, requestedAccess))
-            .setPositiveButton(R.string.allow_always) { _, _ ->
-                inFlightPermissionDialog = null
-                if (!tab.isPrivate) {
-                    kinds.forEach { SitePermissionStore.remember(rawOrigin, it, allow = true) }
-                }
-                grantWebsitePermission(tab, request, supportedResources)
-            }
-            .setNeutralButton(R.string.allow_once) { _, _ ->
-                inFlightPermissionDialog = null
-                grantWebsitePermission(tab, request, supportedResources)
-            }
-            .setNegativeButton(R.string.deny) { _, _ ->
-                inFlightPermissionDialog = null
-                request.deny()
-                permissionInFlightTabId = null
-            }
-            .setOnCancelListener {
-                inFlightPermissionDialog = null
-                request.deny()
-                permissionInFlightTabId = null
-            }
-            .show()
-    }
-
-    private fun grantWebsitePermission(
-        tab: Tab,
-        request: PermissionRequest,
-        resources: List<String>,
-    ) {
-        val missingPermissions = resources
-            .flatMap(::requiredAndroidPermissions)
-            .distinct()
-            .filterNot(::hasPermission)
-
-        if (missingPermissions.isEmpty()) {
-            request.grant(resources.toTypedArray())
-            permissionInFlightTabId = null
-        } else {
-
-            permissionInFlightTabId = tab.id
-            tab.pendingWebsitePermission = Tab.PendingWebsitePermission(
-                request = request,
-                resources = resources,
-            )
-
-            skipWebViewPauseForPermission = true
-            websitePermissionLauncher.launch(missingPermissions.toTypedArray())
-        }
-    }
-
-    private fun resourceToKind(resource: String): SitePermissionStore.Kind? = when (resource) {
-        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> SitePermissionStore.Kind.MICROPHONE
-        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> SitePermissionStore.Kind.CAMERA
-        else -> null
-    }
-
-    private fun offerAppSettingsIfPermanentlyDenied(tab: Tab, deniedPermissions: List<String>) {
-        if (tab !== activeTabOrNull || deniedPermissions.isEmpty()) return
-        val permanentlyDenied = deniedPermissions.any { !shouldShowRequestPermissionRationale(it) }
-        if (!permanentlyDenied) {
-            showToast(getString(R.string.website_permission_denied))
-            return
-        }
-        val label = deniedPermissions.joinToString(getString(R.string.permission_joiner)) {
-            when (it) {
-                Manifest.permission.CAMERA -> getString(R.string.camera_permission_label)
-                Manifest.permission.RECORD_AUDIO -> getString(R.string.microphone_permission_label)
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION ->
-                    getString(R.string.location_permission_kind)
-                else -> it
-            }
-        }.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.permission_blocked_in_android_title)
-            .setMessage(getString(R.string.permission_blocked_in_android_message, label))
-            .setPositiveButton(R.string.open_settings) { _, _ -> openAppDetailsSettings() }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun openAppDetailsSettings() {
-        try {
-            startActivity(
-                Intent(
-                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.fromParts("package", packageName, null),
-                ),
-            )
-        } catch (_: ActivityNotFoundException) {
-
-        }
-    }
-
-    private fun handleGeolocationPermissionRequest(
-        tab: Tab,
-        origin: String?,
-        callback: GeolocationPermissions.Callback?,
-    ) {
-        if (origin.isNullOrBlank() || callback == null) {
-            callback?.invoke(origin, false, false)
-            return
-        }
-        if (geolocationInFlightTabId != null) {
-            callback.invoke(origin, false, false)
-            if (tab === activeTabOrNull) {
-                showToast(getString(R.string.permission_busy))
-            }
-            return
-        }
-
-        if (!tab.isPrivate) {
-            when (SitePermissionStore.decisionFor(origin, SitePermissionStore.Kind.LOCATION)) {
-                SitePermissionStore.Decision.ALLOW -> {
-                    grantGeolocation(tab, origin, callback)
-                    return
-                }
-                SitePermissionStore.Decision.BLOCK -> {
-                    callback.invoke(origin, false, false)
-                    return
-                }
-                SitePermissionStore.Decision.ASK -> Unit
-            }
-        }
-
-        geolocationInFlightTabId = tab.id
-
-        val originLabel = extractOriginLabel(origin)
-        MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.location_permission_title, originLabel))
-            .setMessage(getString(R.string.location_permission_message, originLabel))
-            .setPositiveButton(R.string.allow_always) { _, _ ->
-                if (!tab.isPrivate) {
-                    SitePermissionStore.remember(origin, SitePermissionStore.Kind.LOCATION, allow = true)
-                }
-                grantGeolocation(tab, origin, callback)
-            }
-            .setNeutralButton(R.string.allow_once) { _, _ ->
-                grantGeolocation(tab, origin, callback)
-            }
-            .setNegativeButton(R.string.deny) { _, _ ->
-
-                callback.invoke(origin, false, false)
-                geolocationInFlightTabId = null
-                showToast(getString(R.string.location_denied))
-            }
-            .setOnCancelListener {
-                callback.invoke(origin, false, false)
-                geolocationInFlightTabId = null
-            }
-            .show()
-    }
-
-    private fun grantGeolocation(
-        tab: Tab,
-        origin: String,
-        callback: GeolocationPermissions.Callback,
-    ) {
-        if (hasAnyLocationPermission()) {
-
-            callback.invoke(origin, true, false)
-            geolocationInFlightTabId = null
-            if (!isLocationServiceEnabled()) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.location_services_off_title)
-                    .setMessage(R.string.location_services_off_message)
-                    .setPositiveButton(R.string.open_settings) { _, _ ->
-                        try {
-                            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                        } catch (_: ActivityNotFoundException) {
-
-                        }
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
-            }
-        } else {
-            geolocationInFlightTabId = tab.id
-            tab.pendingGeolocation = Tab.PendingGeolocation(origin, callback)
-            geolocationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                ),
-            )
-        }
-    }
-
-    private fun isLocationServiceEnabled(): Boolean {
-        val lm = getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
-            ?: return true
-        return try {
-            androidx.core.location.LocationManagerCompat.isLocationEnabled(lm)
-        } catch (_: Exception) {
-            true
-        }
     }
 
     private fun showSslErrorDialog(error: SslError?, handler: SslErrorHandler) {
@@ -2712,104 +1978,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleExternalScheme(targetUrl: String): Boolean {
-        val intent = try {
-            if (targetUrl.startsWith("intent:", ignoreCase = true)) {
-                Intent.parseUri(targetUrl, Intent.URI_INTENT_SCHEME)
-            } else {
-                Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
-            }
-        } catch (_: Exception) {
-            showToast(getString(R.string.unsupported_link_message))
-            return true
-        }
-
-        val fallbackUrl = intent.getStringExtra("browser_fallback_url")
-            ?.takeIf {
-                it.startsWith("http://", ignoreCase = true) ||
-                    it.startsWith("https://", ignoreCase = true)
-            }
-
-        if (!sanitizeExternalIntent(intent)) {
-
-            if (fallbackUrl != null) {
-                loadAddress(fallbackUrl)
-                return true
-            }
-            showToast(getString(R.string.unsupported_link_message))
-            return true
-        }
-
-        return try {
-            startActivity(intent)
-            true
-        } catch (_: ActivityNotFoundException) {
-
-            if (fallbackUrl != null) loadAddress(fallbackUrl) else {
-                showToast(getString(R.string.unsupported_link_message))
-            }
-            true
-        } catch (_: SecurityException) {
-            if (fallbackUrl != null) loadAddress(fallbackUrl) else {
-                showToast(getString(R.string.unsupported_link_message))
-            }
-            true
-        }
-    }
-
-    private fun sanitizeExternalIntent(intent: Intent): Boolean {
-        intent.flags = 0
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-        intent.setPackage(null)
-        intent.selector = null
-        intent.component = null
-
-        intent.categories?.toList()?.forEach { intent.removeCategory(it) }
-        intent.removeExtra(Intent.EXTRA_INTENT)
-
-        val action = intent.action ?: return false
-        return action in ALLOWED_EXTERNAL_INTENT_ACTIONS
-    }
-
-    private fun extractIntentUrl(intent: Intent?): String? {
-        if (intent?.action != Intent.ACTION_VIEW) {
-            return null
-        }
-
-        val rawUrl = intent.dataString ?: return null
-
-        val lower = rawUrl.lowercase(java.util.Locale.US)
-        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
-            return null
-        }
-
-        return UrlInputUtils.enforceSecureScheme(rawUrl)
-    }
-
-    private fun loadAddress(url: String) {
-        hideOfflineScreen()
-        val tab = activeTabOrNull
-        if (tab == null) {
-
-            openNewTab(url = url, switchTo = true)
-            return
-        }
-
-        if (url == ABOUT_HOME_URL) {
-            tab.displayUrl = ABOUT_HOME_URL
-            showStartPage()
-            addressBar.setText("")
-            updateSecurityIndicator(null)
-            updateNavigationButtons()
-            return
-        }
-        hideStartPage()
-        updateAddressBar(url)
-        tab.displayUrl = url
-        tab.webView.loadUrl(url)
-    }
-
     /** True when the device has no usable network (no active network, or
      *  the active network can't reach the internet). Defaults to "online"
      *  when connectivity can't be queried so we never falsely block a load
@@ -2842,6 +2010,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Show the branded "site not found" screen over the active tab. Mirrors
+     * [showOfflineScreen]: prepare the surface (hide start page / find bar),
+     * reveal the overlay, hide the active WebView, then hand off to the
+     * controller which binds the copy/CTAs and starts the hero animation.
+     */
+    private fun showSiteNotFound(url: String) {
+        hideStartPage()
+        hideFindBar()
+        findViewById<View>(R.id.site_not_found_overlay).isVisible = true
+        activeTabOrNull?.webView?.isVisible = false
+        siteNotFoundShowing = true
+        siteNotFoundController.show(
+            failedUrl = url,
+            onBack = {
+                hideSiteNotFound()
+                val webView = activeTabOrNull?.webView
+                if (webView?.canGoBack() == true) {
+                    webView.goBack()
+                } else {
+                    showStartPage()
+                }
+            },
+            onRetry = {
+                hideSiteNotFound()
+                activeTabOrNull?.webView?.reload()
+            },
+        )
+    }
+
+    private fun hideSiteNotFound() {
+        if (!siteNotFoundShowing) return
+        siteNotFoundShowing = false
+        siteNotFoundController.stopAnimations()
+        findViewById<View>(R.id.site_not_found_overlay).isVisible = false
+        activeTabOrNull?.webView?.isVisible = true
+    }
+
+    /**
      * The offline overlay is one shared surface, not per-tab, so on every
      * tab switch we re-decide what belongs over the now-active tab:
      *  - it failed and we're still offline → show the branded screen
@@ -2851,15 +2057,36 @@ class MainActivity : AppCompatActivity() {
      */
     private fun evaluateOfflineForActiveTab() {
         val tab = activeTabOrNull
-        if (tab != null && tab.mainFrameErrored) {
-            if (isDeviceOffline()) {
+        val surface = resolveActiveTabSurface(
+            hasMainFrameError = tab?.mainFrameErrored == true,
+            hasUnresolvedHostLookup = tab?.siteNotFoundUrl != null,
+            isDeviceOffline = isDeviceOffline(),
+        )
+        when (surface) {
+            ActiveSurface.OFFLINE -> {
+                // Failed tab + still offline: keep the branded offline screen
+                // over it (stops a stale native error page showing through).
+                hideSiteNotFound()
                 showOfflineScreen()
-            } else {
-                hideOfflineScreen()
-                if (tab.webView.url != null) tab.webView.reload()
             }
-        } else {
-            hideOfflineScreen()
+            ActiveSurface.SITE_NOT_FOUND -> {
+                // Online host-lookup failure on this tab: restore its
+                // site-not-found overlay for the recorded failing URL.
+                hideOfflineScreen()
+                tab?.siteNotFoundUrl?.let { showSiteNotFound(it) }
+            }
+            ActiveSurface.NONE -> {
+                // Nothing should cover this tab. Hide both overlays; and if the
+                // tab had failed offline and we're now back online, reload to
+                // recover it (preserves the prior recovery behavior).
+                hideSiteNotFound()
+                hideOfflineScreen()
+                if (tab != null && tab.mainFrameErrored && !isDeviceOffline() &&
+                    tab.webView.url != null
+                ) {
+                    tab.webView.reload()
+                }
+            }
         }
     }
 
@@ -2947,90 +2174,36 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildSearchUrl(query: String): String = SearchEngineResolver.buildSearchUrl(prefs, query)
 
-    private fun updateAddressBar(url: String?) {
-        if (!url.isNullOrBlank() && !addressBar.isFocused) {
-            renderAddressBar(url)
-        }
-        updateSecurityIndicator(url)
-    }
-
-    private fun prettifyUrl(url: String): String = UrlInputUtils.prettifyUrl(url)
-
-    private fun renderAddressBar(url: String?) {
-        if (addressBar.hasFocus()) return
-        val display = url.orEmpty()
-            .takeIf { it.isNotBlank() }
-            ?.let(::prettifyUrl)
-            .orEmpty()
-            .removePrefix("https://")
-            .removePrefix("http://")
-
-        if (display.isBlank()) {
-            addressBar.setText("")
-            return
-        }
-
-        val pathStart = display.indexOfFirst { it == '/' || it == '?' || it == '#' }
-            .takeIf { it >= 0 }
-            ?: display.length
-        val host = display.substring(0, pathStart)
-        val path = display.substring(pathStart)
-        val span = SpannableString(host + path)
-        span.setSpan(StyleSpan(Typeface.BOLD), 0, host.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
-        if (path.isNotEmpty()) {
-            span.setSpan(
-                ForegroundColorSpan(ContextCompat.getColor(this, R.color.browser_faint)),
-                host.length,
-                span.length,
-                Spanned.SPAN_INCLUSIVE_INCLUSIVE,
+    /**
+     * Launch the bundled ZXing scanner. Camera-permission prompting is
+     * handled by the capture activity itself; a device with no camera or a
+     * hard denial surfaces as a toast rather than a crash.
+     */
+    private fun launchQrScanner() {
+        val options = ScanOptions().apply {
+            setDesiredBarcodeFormats(
+                ScanOptions.QR_CODE,
+                ScanOptions.DATA_MATRIX,
+                ScanOptions.PDF_417,
+                ScanOptions.EAN_13,
+                ScanOptions.UPC_A,
+                ScanOptions.CODE_128,
             )
+            setPrompt(getString(R.string.qr_scan_prompt))
+            setBeepEnabled(false)
+            // Use a fixed-portrait capture activity instead of the library's
+            // landscape-locked default. orientationLocked must be false so the
+            // library's CaptureManager doesn't override the manifest portrait
+            // orientation by re-locking to the device's current rotation.
+            setCaptureActivity(PortraitCaptureActivity::class.java)
+            setOrientationLocked(false)
         }
-        addressBar.setText(span, TextView.BufferType.SPANNABLE)
-        addressBar.setSelection(span.length)
-    }
-
-    private fun updateSecurityIndicator(url: String?) {
-
-        val isHttps = url?.startsWith("https://", ignoreCase = true) == true
-        val isBlank = url.isNullOrBlank()
-
-        if (isHttps || isBlank) {
-            securityIndicator.setImageResource(R.drawable.ic_lock_24)
-            securityIndicator.imageTintList = ContextCompat.getColorStateList(this, R.color.browser_hint)
-            securityIndicator.contentDescription = getString(R.string.security_indicator_secure)
-        } else {
-            securityIndicator.setImageResource(R.drawable.ic_lock_open_24)
-            securityIndicator.imageTintList = ContextCompat.getColorStateList(this, R.color.browser_danger)
-            securityIndicator.contentDescription = getString(R.string.security_indicator_insecure)
-            val tab = activeTabOrNull
-
-            val isHttp = url?.startsWith("http://", ignoreCase = true) == true
-            if (isHttp && tab != null && !tab.insecurePageWarningShown) {
-                tab.insecurePageWarningShown = true
-                Snackbar.make(rootView, R.string.insecure_page_warning, Snackbar.LENGTH_LONG)
-                    .setAnchorView(navigationCard)
-                    .show()
-            }
+        try {
+            qrScanLauncher.launch(options)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "QR scanner unavailable", e)
+            showToast(getString(R.string.qr_scan_unavailable))
         }
-    }
-
-    private fun updateNavigationButtons() {
-
-        updateButtonState(bookmarkButton, true)
-        updateButtonState(searchButton, true)
-        updateButtonState(homeButton, true)
-        updateButtonState(menuButton, true)
-        updateButtonState(refreshButton, activeTabOrNull != null)
-
-        tabsButton.isEnabled = true
-        tabsButton.alpha = 1f
-        val count = tabs.size
-        tabCountText.text = if (count > 9) "9+" else count.toString()
-    }
-
-    private fun updateButtonState(button: ImageButton, enabled: Boolean) {
-        button.isEnabled = enabled
-        button.alpha = if (enabled) 1f else 0.35f
     }
 
     private fun resolveUserInput(rawInput: String): String {
@@ -3080,6 +2253,11 @@ class MainActivity : AppCompatActivity() {
             if (isBookmarked) R.drawable.bg_menu_quick_action_selected else R.drawable.bg_menu_quick_action,
         )
         saveLabel.setText(if (isBookmarked) R.string.saved_page else R.string.save_page)
+        // Distinct from the plain outline bookmark used for "view bookmarks":
+        // a bookmark-with-plus to add, a filled bookmark once saved.
+        saveIcon.setImageResource(
+            if (isBookmarked) R.drawable.ic_bookmark_filled_24 else R.drawable.ic_bookmark_add_24,
+        )
         val accent = resolveThemeColor(R.attr.browserAccent)
         saveLabel.setTextColor(accent)
         saveIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
@@ -3108,8 +2286,14 @@ class MainActivity : AppCompatActivity() {
         setMenuTileEnabled(view.findViewById(R.id.menu_find), hasPage)
         setMenuTileEnabled(view.findViewById(R.id.menu_backward), tab?.webView?.canGoBack() == true)
         setMenuTileEnabled(view.findViewById(R.id.menu_forward), tab?.webView?.canGoForward() == true)
-        setMenuTileEnabled(view.findViewById(R.id.menu_private), multiProfileSupported)
+        setMenuTileEnabled(view.findViewById(R.id.menu_private), tabController.multiProfileSupported)
         setMenuTileEnabled(view.findViewById(R.id.menu_print), hasPage)
+        setMenuTileEnabled(view.findViewById(R.id.menu_translate), canEnterReaderMode())
+        setMenuTileEnabled(view.findViewById(R.id.menu_offline), canEnterReaderMode())
+
+        val savedPagesCount = OfflineArticleStore.list(this).size
+        view.findViewById<TextView>(R.id.menu_saved_pages_summary).text =
+            getString(R.string.saved_pages_summary, savedPagesCount)
 
         val downloads = DownloadRepository.getSnapshot()
         val activeDownloads = downloads.count {
@@ -3156,13 +2340,25 @@ class MainActivity : AppCompatActivity() {
             dialog.dismiss()
             printCurrentPage()
         }
+        view.findViewById<View>(R.id.menu_translate).setOnClickListener {
+            dialog.dismiss()
+            translateCurrentPage()
+        }
+        view.findViewById<View>(R.id.menu_offline).setOnClickListener {
+            dialog.dismiss()
+            saveCurrentPageOffline()
+        }
+        view.findViewById<View>(R.id.menu_saved_pages).setOnClickListener {
+            dialog.dismiss()
+            showSavedPages()
+        }
         view.findViewById<View>(R.id.menu_private).setOnClickListener {
             dialog.dismiss()
-            openNewTab(url = homeUrl(), switchTo = true, isPrivate = true)
+            tabController.openNewTab(url = homeUrl(), switchTo = true, isPrivate = true)
         }
         view.findViewById<View>(R.id.menu_downloads).setOnClickListener {
             dialog.dismiss()
-            openDownloadsScreen()
+            downloadCoordinator.openDownloadsScreen()
         }
         view.findViewById<View>(R.id.menu_library).setOnClickListener {
             dialog.dismiss()
@@ -3196,7 +2392,8 @@ class MainActivity : AppCompatActivity() {
             intArrayOf(
                 R.id.menu_share, R.id.menu_save, R.id.menu_reader, R.id.menu_desktop,
                 R.id.menu_private, R.id.menu_find, R.id.menu_backward,
-                R.id.menu_forward, R.id.menu_print,
+                R.id.menu_forward, R.id.menu_print, R.id.menu_translate,
+                R.id.menu_offline,
             ).forEach { id ->
                 val tile = view.findViewById<View>(id)
                 tile.layoutParams = tile.layoutParams.apply { width = tileWidth }
@@ -3266,6 +2463,85 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Re-open the current page through Google Translate's page proxy,
+     * targeting English with source-language auto-detection. The proxy
+     * renders a fully translated copy of the site (translate.goog), so this
+     * works on any http(s) page without an on-device translation model.
+     */
+    private fun translateCurrentPage() {
+        val url = activeTabOrNull?.webView?.url
+        if (url.isNullOrBlank() ||
+            !(url.startsWith("http://", true) || url.startsWith("https://", true))
+        ) {
+            showToast(getString(R.string.translate_not_available))
+            return
+        }
+        if (url.contains(".translate.goog") || url.contains("translate.google.com")) {
+            showToast(getString(R.string.translate_already))
+            return
+        }
+        val proxy = "https://translate.google.com/translate?sl=auto&tl=en&u=" + Uri.encode(url)
+        navigationController.loadAddress(proxy)
+    }
+
+    /**
+     * Save the current page's reader-extracted article for offline reading.
+     * Reuses the [ReaderMode] pipeline so we store clean, self-contained
+     * article HTML (loaded back via loadDataWithBaseURL, no file access).
+     * Non-article pages report "not eligible" rather than saving a broken
+     * snapshot.
+     */
+    private fun saveCurrentPageOffline() {
+        val tab = activeTabOrNull
+        val url = tab?.webView?.url
+        if (tab == null || url.isNullOrBlank() || !canEnterReaderMode()) {
+            showToast(getString(R.string.offline_save_not_eligible))
+            return
+        }
+        val title = tab.webView.title.orEmpty()
+        showToast(getString(R.string.offline_saving))
+        ReaderMode.extractInto(tab.webView) { html ->
+            if (html == null) {
+                showToast(getString(R.string.offline_save_not_eligible))
+                return@extractInto
+            }
+            OfflineArticleStore.save(this, url, title, html) { ok ->
+                showToast(getString(if (ok) R.string.offline_saved else R.string.offline_save_failed))
+            }
+        }
+    }
+
+    private fun showSavedPages() {
+        val articles = OfflineArticleStore.list(this)
+        if (articles.isEmpty()) {
+            showToast(getString(R.string.offline_empty))
+            return
+        }
+        val labels = articles.map { it.title.ifBlank { it.url } }.toTypedArray()
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.saved_pages_title)
+            .setItems(labels) { _, which -> openSavedArticle(articles[which]) }
+            .setNeutralButton(R.string.offline_clear_all) { _, _ ->
+                OfflineArticleStore.clear(this)
+                showToast(getString(R.string.offline_cleared))
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun openSavedArticle(article: OfflineArticleStore.OfflineArticle) {
+        val html = OfflineArticleStore.readHtml(this, article.id)
+        if (html == null) {
+            showToast(getString(R.string.offline_open_failed))
+            return
+        }
+        val tab = activeTabOrNull ?: tabController.openNewTab(url = null, switchTo = true) ?: return
+        hideStartPage()
+        tab.displayUrl = article.url
+        tab.webView.loadDataWithBaseURL(article.url, html, "text/html", "utf-8", article.url)
+    }
+
     private fun clearBrowsingData() {
 
         CookieManager.getInstance().removeAllCookies(null)
@@ -3282,11 +2558,33 @@ class MainActivity : AppCompatActivity() {
 
         SitePermissionStore.clearAll()
         showToast(getString(R.string.clear_browsing_data_done))
-        loadAddress(homeUrl())
+        navigationController.loadAddress(homeUrl())
+    }
+
+    /**
+     * Silent variant of [clearBrowsingData] for the auto-delete-on-exit
+     * path: no toast, no home reload (the activity is going away). Wrapped
+     * in runCatching so a teardown-time failure can never crash onDestroy.
+     */
+    private fun wipeBrowsingDataOnExit() {
+        runCatching {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            clearPrivateProfileDataIfAny()
+            for (tab in tabs) {
+                tab.webView.clearHistory()
+                tab.webView.clearCache(true)
+                tab.webView.clearFormData()
+            }
+            WebStorage.getInstance().deleteAllData()
+            HistoryRepository.clear()
+            SitePermissionStore.clearAll()
+            Log.i("MainActivity", "Auto-deleted browsing data on exit")
+        }.onFailure { Log.w("MainActivity", "wipeBrowsingDataOnExit failed", it) }
     }
 
     private fun clearPrivateProfileDataIfAny() {
-        if (!multiProfileSupported) return
+        if (!tabController.multiProfileSupported) return
         try {
             val store = ProfileStore.getInstance()
             if (PRIVATE_PROFILE_NAME !in store.allProfileNames) return
@@ -3299,31 +2597,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateSearchEngineUi() {
-        val name = SearchEngineResolver.displayName(prefs)
-        addressBar.hint = getString(R.string.address_hint_with_engine, name)
-        renderBrowserCaption(name, activeTabOrNull?.isPrivate == true)
-    }
-
-    private fun renderBrowserCaption(searchEngineName: String, isPrivate: Boolean) {
-        val span = SpannableStringBuilder()
-        span.append("● ")
-        span.setSpan(
-            ForegroundColorSpan(resolveThemeColor(R.attr.browserAccent)),
-            0,
-            1,
-            Spanned.SPAN_INCLUSIVE_INCLUSIVE,
-        )
-        span.append(if (isPrivate) "Private · " else "Search · ")
-        span.append(searchEngineName)
-        span.setSpan(
-            ForegroundColorSpan(ContextCompat.getColor(this, R.color.browser_hint)),
-            2,
-            span.length,
-            Spanned.SPAN_INCLUSIVE_INCLUSIVE,
-        )
-        captionView.text = span
-    }
 
     private fun requestDefaultBrowserRole() {
         val roleManager = getSystemService<RoleManager>() ?: run {
@@ -3363,26 +2636,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun maybeRequestNotificationPermission() {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-            return
-        }
-
-        if (
-            prefs.notificationPromptShown ||
-            ContextCompat.checkSelfPermission(this, POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-
-        prefs.notificationPromptShown = true
-        notificationPermissionLauncher.launch(POST_NOTIFICATIONS)
-    }
-
-    private fun openDownloadsScreen() {
-        startActivity(Intent(this, DownloadsActivity::class.java))
-    }
-
     private fun shareCurrentPage() {
         val currentUrl = activeTabOrNull?.webView?.url ?: return showToast(getString(R.string.no_page_loaded))
         shareUrl(currentUrl, chooserTitleRes = R.string.share_page)
@@ -3410,14 +2663,14 @@ class MainActivity : AppCompatActivity() {
     private fun addLinkContextMenuItems(menu: ContextMenu, url: String) {
         menu.add(getString(R.string.link_action_open_in_new_tab))
             .setOnMenuItemClickListener {
-                openNewTab(url = url, switchTo = false)
+                tabController.openNewTab(url = url, switchTo = false)
                 showToast(getString(R.string.tab_opened_in_background))
                 true
             }
-        if (multiProfileSupported) {
+        if (tabController.multiProfileSupported) {
             menu.add(getString(R.string.link_action_open_in_private_tab))
                 .setOnMenuItemClickListener {
-                    openNewTab(url = url, switchTo = true, isPrivate = true)
+                    tabController.openNewTab(url = url, switchTo = true, isPrivate = true)
                     true
                 }
         }
@@ -3444,80 +2697,6 @@ class MainActivity : AppCompatActivity() {
                 shareUrl(url)
                 true
             }
-    }
-
-    private fun addSaveImageItem(menu: ContextMenu, sourceTab: Tab) {
-        menu.add(getString(R.string.image_action_save_image))
-            .setOnMenuItemClickListener {
-                requestLastTouchedImageUrl(sourceTab) { imageUrl ->
-                    saveImageFromUrl(imageUrl, sourceTab)
-                }
-                true
-            }
-    }
-
-    private fun requestLastTouchedImageUrl(tab: Tab, onUrl: (String) -> Unit) {
-        val handler = android.os.Handler(android.os.Looper.getMainLooper()) { msg ->
-            val url = msg.data?.getString("url")
-            if (!url.isNullOrBlank()) onUrl(url)
-            true
-        }
-        tab.webView.requestImageRef(handler.obtainMessage())
-    }
-
-    private fun saveImageFromUrl(imageUrl: String, sourceTab: Tab) {
-
-        if (imageUrl.startsWith("blob:", ignoreCase = true) ||
-            imageUrl.startsWith("data:", ignoreCase = true)
-        ) {
-            showToast(getString(R.string.blob_download_not_supported))
-            return
-        }
-
-        if (BrowserBlocker.findMatch(imageUrl) != null) {
-            showToast(getString(R.string.download_blocked))
-            return
-        }
-        val item = DownloadRepository.enqueueDownload(
-            url = imageUrl,
-            contentDisposition = null,
-            mimeType = guessImageMimeFromUrl(imageUrl),
-            contentLengthHint = -1L,
-            userAgent = baseUserAgent,
-            referer = sourceTab.webView.url,
-            profileName = if (sourceTab.isPrivate) PRIVATE_PROFILE_NAME else null,
-        )
-        DownloadService.start(this)
-        Snackbar.make(
-            rootView,
-            getString(R.string.download_started, item.fileName),
-            Snackbar.LENGTH_LONG,
-        )
-            .setAnchorView(navigationCard)
-            .setAction(R.string.view_downloads) {
-                openDownloadsScreen()
-            }
-            .show()
-    }
-
-    private fun guessImageMimeFromUrl(url: String): String? {
-        val extension = try {
-            val path = java.net.URI(url).path ?: return null
-            path.substringAfterLast('.', "").lowercase()
-        } catch (_: Exception) {
-            return null
-        }
-        return when (extension) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "gif" -> "image/gif"
-            "webp" -> "image/webp"
-            "bmp" -> "image/bmp"
-            "heic", "heif" -> "image/heif"
-            "avif" -> "image/avif"
-            "svg" -> "image/svg+xml"
-            else -> null
-        }
     }
 
     private fun printCurrentPage() {
@@ -3559,23 +2738,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun hasPermission(permission: String): Boolean {
-        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun hasAnyLocationPermission(): Boolean {
-        return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) ||
-            hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
-    }
-
-    private fun requiredAndroidPermissions(resource: String): List<String> {
-        return when (resource) {
-            PermissionRequest.RESOURCE_AUDIO_CAPTURE -> listOf(Manifest.permission.RECORD_AUDIO)
-            PermissionRequest.RESOURCE_VIDEO_CAPTURE -> listOf(Manifest.permission.CAMERA)
-            else -> emptyList()
-        }
-    }
-
     private fun extractOriginLabel(origin: String?): String {
         val uri = origin?.let(Uri::parse)
         return uri?.host ?: origin ?: getString(R.string.this_site)
@@ -3587,36 +2749,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private class AddressSuggestionAdapter(
-        private val context: Context,
-    ) : BaseAdapter() {
-        private var items: List<HistoryEntry> = emptyList()
-
-        fun submit(newItems: List<HistoryEntry>) {
-            items = newItems
-            notifyDataSetChanged()
-        }
-
-        override fun getCount(): Int = items.size
-
-        override fun getItem(position: Int): HistoryEntry? = items.getOrNull(position)
-
-        override fun getItemId(position: Int): Long = position.toLong()
-
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val view = convertView ?: LayoutInflater.from(context)
-                .inflate(R.layout.item_address_suggestion, parent, false)
-            val entry = getItem(position) ?: return view
-            val title = view.findViewById<TextView>(R.id.suggestion_title)
-            val url = view.findViewById<TextView>(R.id.suggestion_url)
-            title.text = entry.title.ifBlank { entry.url }
-            url.text = UrlInputUtils.prettifyUrl(entry.url)
-                .removePrefix("https://")
-                .removePrefix("http://")
-            return view
-        }
-    }
-
     companion object {
 
         private const val CHROME_ANIM_GATE_MS = 350L
@@ -3624,49 +2756,19 @@ class MainActivity : AppCompatActivity() {
         private const val INACTIVITY_HIDE_MS = 4_000L
 
         private const val FIND_DEBOUNCE_MS = 150L
-        private const val ADDRESS_SUGGESTION_LIMIT = 8
         private const val ADDRESS_SUGGESTION_DISMISS_DELAY_MS = 120L
 
-        // Brief window after a keyboard-hide during editing in which a
-        // predictive-back navigation is swallowed. Long enough to catch
-        // the same back event, short enough not to eat a deliberate
-        // second press.
-        private const val BACK_NAV_SWALLOW_WINDOW_MS = 150L
-
-        // Window after the first "exit" BACK press during which a second
-        // press actually finishes the app (classic press-back-again-to-exit).
-        private const val BACK_TO_EXIT_WINDOW_MS = 2000L
-
-        private const val STATE_TAB_URLS = "state_tab_urls"
-        private const val STATE_ACTIVE_TAB_INDEX = "state_active_tab_index"
-        private const val STATE_ACTIVE_TAB_WEBVIEW = "state_active_tab_webview"
         private const val PRIVACY_SCRIPT_TRIM_REFERRER = 1
         private const val PRIVACY_SCRIPT_BLOCK_WEBRTC = 2
 
-        private const val PRIVATE_PROFILE_NAME = "incognito"
+        const val PRIVATE_PROFILE_NAME = "incognito"
 
         const val ABOUT_HOME_URL = "about:home"
 
         /** Blank page a backgrounded tab is parked on when discarded under
          *  memory pressure; its real URL is reloaded from pendingLoadUrl on
          *  reactivation. Excluded from history and the tab's display URL. */
-        private const val ABOUT_BLANK_URL = "about:blank"
-
-        /** Proactive tab sleeping: a background tab idle this long is parked
-         *  on about:blank to free memory (reloads when you return to it). */
-        private const val TAB_SLEEP_AFTER_MS = 3L * 60L * 1000L // 3 minutes
-
-        /** How often the sleep checker scans for idle tabs while foreground. */
-        private const val TAB_SLEEP_CHECK_INTERVAL_MS = 60L * 1000L
-
-        private val ALLOWED_EXTERNAL_INTENT_ACTIONS = setOf(
-            Intent.ACTION_VIEW,
-            Intent.ACTION_DIAL,
-            Intent.ACTION_SENDTO,
-            Intent.ACTION_SEND,
-            Intent.ACTION_SEND_MULTIPLE,
-            Intent.ACTION_WEB_SEARCH,
-        )
+        const val ABOUT_BLANK_URL = "about:blank"
 
         private val ANDROID_PLATFORM_REGEX = Regex("\\(Linux; Android[^)]*\\)")
 

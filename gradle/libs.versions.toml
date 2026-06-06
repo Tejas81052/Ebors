@@ -12,6 +12,7 @@ recyclerview = "1.4.0"
 swipeRefreshLayout = "1.1.0"
 okhttp = "4.12.0"
 webkit = "1.12.1"
+zxing = "4.3.0"
 # Real org.json for unit tests. The android.jar used by JVM unit tests
 # stubs every org.json method to throw "Stub!", so a test that exercises
 # JSON parsing (BrowserBlocker's blocklist loader) needs the genuine
@@ -31,6 +32,7 @@ androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview"
 androidx-swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swipeRefreshLayout" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
+zxing-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxing" }
 json = { group = "org.json", name = "json", version.ref = "json" }
 
 [plugins]
