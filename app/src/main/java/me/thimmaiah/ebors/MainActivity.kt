@@ -422,11 +422,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        if (!::prefs.isInitialized) return
         tabController.saveState(outState)
     }
 
     override fun onPause() {
-
+        // The onboarding-redirect path in onCreate calls finish() before this
+        // activity is fully initialized, so the lifecycle teardown below would
+        // touch uninitialized lateinit fields (prefs / tabController). Bail out
+        // early in that case.
+        if (!::prefs.isInitialized) {
+            super.onPause()
+            return
+        }
         // While audio is playing we deliberately keep every WebView (and JS
         // timers) alive so playback continues in the background; the page
         // masked its own visibility when playback started so it won't
@@ -444,6 +452,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // See onPause: skip when the activity finished during onboarding redirect.
+        if (!::prefs.isInitialized) return
 
         permissionController.skipWebViewPauseForPermission = false
 
@@ -473,6 +483,7 @@ class MainActivity : AppCompatActivity() {
     @Suppress("DEPRECATION") // TRIM_MEMORY_MODERATE/COMPLETE still fire on older OS
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        if (!::prefs.isInitialized) return
         when (level) {
             TRIM_MEMORY_RUNNING_LOW, TRIM_MEMORY_RUNNING_CRITICAL,
             TRIM_MEMORY_MODERATE, TRIM_MEMORY_COMPLETE,
@@ -481,6 +492,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // The onboarding-redirect path in onCreate calls finish() before this
+        // activity is fully initialized; skip teardown that would touch
+        // uninitialized lateinit fields (prefs / tabController / searchController).
+        if (!::prefs.isInitialized) {
+            super.onDestroy()
+            return
+        }
         fullscreenVideo.exit()
         // Auto-delete on exit: only when the task is genuinely finishing
         // (back-to-exit / removed from recents), never on a transient
